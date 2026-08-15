@@ -20,3 +20,7 @@
 - [x] Add Vitest coverage for auth protection, ownership isolation, contacts, stage changes, activity ordering, follow-up lifecycle, quote totals, and dashboard aggregation.
 - [x] Run type checks, unit tests, desktop and mobile visual verification, and manual acceptance checks.
 - [x] Synchronize the completed implementation to the selected GitHub repository at https://github.com/Shahrukhxkhan/CRM.
+- [x] Add owner-scoped CSV contact export with a documented stable column layout.
+- [x] Add validated CSV contact import with a file-size limit, row-level errors, and no partial invalid row writes.
+- [x] Add accessible contact-list controls for CSV upload, import result reporting, and CSV download.
+- [x] Add CSV parser, validation, import, and export Vitest coverage; verify and push the completed feature to GitHub.

@@ -13,6 +13,7 @@ import { OPEN_PIPELINE_STAGES, PENDING_QUOTE_STATUSES, type PipelineStage } from
 import { belongsToOwner } from "./access";
 import { databaseUnavailable, invalidRelationship, recordNotFound } from "./errors";
 import { buildDashboardSummary, completionTimestamp, newestActivitiesFirst } from "./logic";
+import { createContactCsv, parseContactCsv } from "./csv";
 import { calculateQuoteTotals, toMoneyString } from "./quoteMath";
 import type {
   activityInputSchema,
@@ -241,6 +242,69 @@ export async function deleteContact(ownerId: number, id: number) {
   const result = await db.delete(contacts).where(and(eq(contacts.id, id), eq(contacts.ownerId, ownerId)));
   if (Number((result as { rowsAffected?: number }).rowsAffected) === 0) recordNotFound("Contact");
   return { success: true as const };
+}
+
+export async function exportContactsCsv(ownerId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select({ contact: contacts, companyName: companies.name })
+    .from(contacts)
+    .leftJoin(companies, eq(contacts.companyId, companies.id))
+    .where(eq(contacts.ownerId, ownerId))
+    .orderBy(asc(contacts.name));
+  const contactIds = rows.map(row => row.contact.id);
+  const tags = contactIds.length ? await db.select().from(contactTags).where(inArray(contactTags.contactId, contactIds)) : [];
+  const tagsByContact = new Map<number, string[]>();
+  tags.forEach(tag => tagsByContact.set(tag.contactId, [...(tagsByContact.get(tag.contactId) ?? []), tag.name]));
+  return createContactCsv(rows.map(({ contact, companyName }) => ({
+    name: contact.name,
+    email: contact.email,
+    phone: contact.phone,
+    company: companyName ?? null,
+    source: contact.source,
+    estimatedValue: contact.estimatedValue,
+    stage: contact.stage,
+    tags: tagsByContact.get(contact.id) ?? [],
+    notes: contact.notes,
+  })));
+}
+
+export async function importContactsCsv(ownerId: number, csvText: string) {
+  const parsed = parseContactCsv(csvText);
+  if (parsed.errors.length) return { created: 0, errors: parsed.errors };
+  const db = await requireDb();
+  const created = await db.transaction(async tx => {
+    const companyIds = new Map<string, number>();
+    let count = 0;
+    for (const row of parsed.rows) {
+      let companyId: number | null = null;
+      if (row.companyName) {
+        const key = row.companyName.toLocaleLowerCase();
+        companyId = companyIds.get(key) ?? null;
+        if (!companyId) {
+          const [existing] = await tx.select({ id: companies.id }).from(companies).where(and(eq(companies.ownerId, ownerId), eq(companies.name, row.companyName))).limit(1);
+          companyId = existing?.id ?? insertId(await tx.insert(companies).values({ ownerId, name: row.companyName }));
+          companyIds.set(key, companyId);
+        }
+      }
+      const result = await tx.insert(contacts).values({
+        ownerId,
+        companyId,
+        name: row.name,
+        email: row.email ?? null,
+        phone: row.phone ?? null,
+        source: row.source ?? null,
+        estimatedValue: toMoneyString(row.estimatedValue),
+        stage: row.stage ?? "new",
+        notes: row.notes ?? null,
+      });
+      const contactId = insertId(result);
+      if (row.tags.length) await tx.insert(contactTags).values(row.tags.map(name => ({ contactId, name })));
+      count += 1;
+    }
+    return count;
+  });
+  return { created, errors: [] as { row: number; message: string }[] };
 }
 
 export async function createActivity(ownerId: number, input: ActivityInput) {

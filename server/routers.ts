@@ -14,10 +14,12 @@ import {
   deleteContact,
   deleteFollowUp,
   deleteQuote,
+  exportContactsCsv,
   getCompany,
   getContact,
   getDashboard,
   getQuote,
+  importContactsCsv,
   listCompanies,
   listContacts,
   listFollowUps,
@@ -32,6 +34,7 @@ import {
   updateQuoteStatus,
 } from "./crm/db";
 import { PIPELINE_STAGES, QUOTE_STATUSES } from "./crm/constants";
+import { MAX_CONTACT_CSV_BYTES } from "./crm/csv";
 import {
   activityInputSchema,
   companyInputSchema,
@@ -85,6 +88,10 @@ export const appRouter = router({
     changeStage: protectedProcedure
       .input(recordIdSchema.extend({ stage: z.enum(PIPELINE_STAGES) }))
       .mutation(({ ctx, input }) => updateContactStage(ctx.user.id, input.id, input.stage)),
+    exportCsv: protectedProcedure.query(({ ctx }) => exportContactsCsv(ctx.user.id)),
+    importCsv: protectedProcedure
+      .input(z.object({ csv: z.string().max(MAX_CONTACT_CSV_BYTES, "The CSV file exceeds the 1 MB import limit.") }))
+      .mutation(({ ctx, input }) => importContactsCsv(ctx.user.id, input.csv)),
     delete: protectedProcedure.input(recordIdSchema).mutation(({ ctx, input }) => deleteContact(ctx.user.id, input.id)),
   }),
   activities: router({

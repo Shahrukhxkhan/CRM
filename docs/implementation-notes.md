@@ -7,3 +7,5 @@ The unauthenticated automated preview captured the layout skeleton during the OA
 The existing authentication hook resolves the current user through the public `auth.me` procedure and exposes loading, error, and sign-out state. The protected workspace shell uses this hook to prevent CRM pages from rendering until a user session has been established.
 
 Desktop and mobile preview checks confirmed that the authenticated shell loads the dashboard, leads, companies, follow-ups, and quotes routes with distinct navigation states and useful empty states. On mobile, the sidebar condenses to a compact workspace header, action buttons retain adequate tap targets, metric cards stack without horizontal overflow, and the follow-up filters remain horizontally accessible.
+
+The contact CSV actions were verified in the leads workspace at desktop and mobile widths. Import CSV, Export CSV, and Add lead remain visible, keyboard-reachable controls; on mobile they wrap into separate, comfortably sized controls without clipping the search and stage filters.
