@@ -24,3 +24,4 @@
 - [x] Add validated CSV contact import with a file-size limit, row-level errors, and no partial invalid row writes.
 - [x] Add accessible contact-list controls for CSV upload, import result reporting, and CSV download.
 - [x] Add CSV parser, validation, import, and export Vitest coverage; verify and push the completed feature to GitHub.
+- [x] Add a complete repository README with setup, environment, database, testing, feature, and CSV transfer guidance.
