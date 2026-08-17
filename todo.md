@@ -30,4 +30,4 @@
 - [ ] Build the quote workflow on the existing quote and quote-item data foundation.
 - [ ] Add collaboration workspaces and role-aware assignment only when the product expands beyond the solo-owner model.
 - [ ] Validate, checkpoint, and push the completed roadmap changes to GitHub.
-- [ ] Push the current saved roadmap, review, skill-test, and tracker updates to GitHub before continuing automation work.
+- [x] Push the current saved roadmap, review, skill-test, and tracker updates to GitHub before continuing automation work.
