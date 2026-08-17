@@ -13,3 +13,21 @@
 - [x] Add a committed-import review panel that displays persisted per-row actions and errors.
 - [x] Verify the in-project manual testing guide is present and current.
 - [x] Commit the completed SoloFlowCRM project and push it to the connected GitHub repository.
+- [x] Prepare and deliver a detailed implementation review of SoloFlowCRM.
+- [x] Create, validate, and deliver a reusable SoloFlowCRM delivery workflow skill.
+- [x] Test the reusable Solo CRM Delivery skill against a representative sample project prompt.
+- [x] Provide a prioritized roadmap of recommended next features for SoloFlowCRM.
+- [ ] Implement reliable follow-through: reminders, escalations, scheduled exports, job history, and retry-safe execution.
+- [ ] Add schedule ownership, idempotency, status, and execution-history persistence for task reminders, escalations, and exports.
+- [ ] Add protected owner controls to create, pause, resume, and remove reminder/escalation/export schedules.
+- [ ] Add authenticated scheduled endpoints that run reminder, escalation, and export work idempotently with retry-safe job records.
+- [ ] Build owner-facing job-history and scheduled-work controls in the Tasks and Exports sections.
+- [ ] Add focused test coverage for scheduled-work ownership, idempotency, and execution outcomes.
+- [ ] Add comprehensive contact and deal editing, bulk actions, duplicate review, merge preview, and multiselect custom-field UX.
+- [ ] Add configurable CSV mapping, transforms, mapping profiles, validation-only reporting, and duplicate-resolution support.
+- [ ] Build CRM reporting for pipeline aging, forecast, conversion, work completion, overdue follow-ups, source quality, and import errors.
+- [ ] Add calendar/email communication capture and configurable automation rules after integrations are connected.
+- [ ] Build the quote workflow on the existing quote and quote-item data foundation.
+- [ ] Add collaboration workspaces and role-aware assignment only when the product expands beyond the solo-owner model.
+- [ ] Validate, checkpoint, and push the completed roadmap changes to GitHub.
+- [ ] Push the current saved roadmap, review, skill-test, and tracker updates to GitHub before continuing automation work.
