@@ -1,27 +1,15 @@
 # Project TODO
 
-- [x] Define and document the normalized owner-scoped schema for companies, contacts, activities, follow-ups, quotes, and quote items.
-- [x] Obtain approval for the schema, relationship constraints, and cascade deletion policy before database implementation.
-- [x] Add database tables, indexes, relations, and a synchronized migration for every approved CRM entity.
-- [x] Implement protected, owner-scoped query helpers and typed API procedures with validated error handling.
-- [x] Preserve Manus OAuth authentication and block unauthenticated access to CRM routes and procedures.
-- [x] Build a responsive authenticated application shell using the supplied persistent sidebar layout.
-- [x] Build a dashboard with stage-level open-lead summary, overdue follow-up count, pending quote count, action queue, and recent activity.
-- [x] Verify the dashboard in an authenticated workspace session, including its loading, empty, error, and populated states.
-- [x] Implement company CRUD, contact association, and company detail views with associated contacts.
-- [x] Implement contacts and leads CRUD with field-level validation, owner isolation, confirmed deletion, and searchable list views.
-- [x] Implement the six-stage lead pipeline with pointer drag-and-drop plus keyboard-accessible select and Alt+Arrow stage controls.
-- [x] Implement a contact profile with company, tags, notes, activities, follow-ups, and quotes as linked context panels.
-- [x] Implement activity timeline CRUD for calls, emails, meetings, messages, and notes in predictable chronological order.
-- [x] Implement follow-up CRUD, due-date filters, completion/reopen actions, dashboard action queue, and confirmed deletion.
-- [x] Implement quote CRUD with one or more line items, server-calculated subtotal and total, status changes, and confirmed deletion.
-- [x] Provide polished responsive desktop, tablet, and mobile layouts with keyboard access and visible focus states.
-- [x] Provide loading, empty, validation, mutation error, and confirmation states for every primary list and detail workflow.
-- [x] Add Vitest coverage for auth protection, ownership isolation, contacts, stage changes, activity ordering, follow-up lifecycle, quote totals, and dashboard aggregation.
-- [x] Run type checks, unit tests, desktop and mobile visual verification, and manual acceptance checks.
-- [x] Synchronize the completed implementation to the selected GitHub repository at https://github.com/Shahrukhxkhan/CRM.
-- [x] Add owner-scoped CSV contact export with a documented stable column layout.
-- [x] Add validated CSV contact import with a file-size limit, row-level errors, and no partial invalid row writes.
-- [x] Add accessible contact-list controls for CSV upload, import result reporting, and CSV download.
-- [x] Add CSV parser, validation, import, and export Vitest coverage; verify and push the completed feature to GitHub.
-- [x] Add a complete repository README with setup, environment, database, testing, feature, and CSV transfer guidance.
+- [x] Confirm the solo-workspace operating model, core entities, scaffolded full-stack architecture, and schema approval.
+- [x] Define and apply the owner-scoped CRM schema, including contact, company, activity, follow-up, and quote foundations.
+- [x] Add advanced contact management with normalized-email duplicate detection, archival, restoration, merging, custom fields, lists, saved searches, and attachments.
+- [x] Build the auditable CSV import workflow with preview, commit, review, snapshots, undo, and owner-scoped validation.
+- [x] Add scheduled export configuration and generated export download history without activating background schedules.
+- [x] Extend personal tasks with priority, recurrence metadata, reminder/escalation metadata, templates, comments, and calendar-ready task dates.
+- [x] Build configurable deal pipelines, stages, lost reasons, deal stage history, weighted forecasting, and deal-linked activities.
+- [x] Seed an owner’s default six-stage pipeline only when the owner has no existing pipeline and never generate deals from contact records.
+- [x] Build the dashboard layout with exactly the Contacts, Lists, Imports, Tasks, Deals, Pipelines, and Exports navigation sections.
+- [x] Add automated tests, perform manual UI verification, and document how to test each delivered module.
+- [x] Add a committed-import review panel that displays persisted per-row actions and errors.
+- [x] Verify the in-project manual testing guide is present and current.
+- [ ] Commit the completed SoloFlowCRM project and push it to the connected GitHub repository.

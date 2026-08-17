@@ -1,45 +1,53 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
-import DashboardLayout from "./components/DashboardLayout";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Dashboard from "./pages/Dashboard";
-import Companies, { CompanyDetail } from "./pages/Companies";
-import ContactDetail from "./pages/ContactDetail";
-import Leads from "./pages/Leads";
-import FollowUps from "./pages/FollowUps";
-import Quotes, { QuoteDetail } from "./pages/Quotes";
-import NotFound from "./pages/NotFound";
-import WorkspacePlaceholder from "./pages/WorkspacePlaceholder";
-
-function WorkspaceRoute({ children }: { children: React.ReactNode }) {
-  return <DashboardLayout>{children}</DashboardLayout>;
-}
+import DashboardLayout from "./components/DashboardLayout";
+import { ContactsPage, ExportsPage, ImportsPage, ListsPage } from "./pages/Workspace";
+import { DealsWorkspace, PipelinesWorkspace, TasksWorkspace } from "./pages/AdvancedPanels";
+import ImportReview from "./pages/ImportReview";
 
 function Router() {
   return (
-    <Switch>
-      <Route path="/"><WorkspaceRoute><Dashboard /></WorkspaceRoute></Route>
-      <Route path="/leads/:id"><WorkspaceRoute><ContactDetail /></WorkspaceRoute></Route>
-      <Route path="/leads"><WorkspaceRoute><Leads /></WorkspaceRoute></Route>
-      <Route path="/companies/:id"><WorkspaceRoute><CompanyDetail /></WorkspaceRoute></Route>
-      <Route path="/companies"><WorkspaceRoute><Companies /></WorkspaceRoute></Route>
-      <Route path="/follow-ups"><WorkspaceRoute><FollowUps /></WorkspaceRoute></Route>
-      <Route path="/quotes/:id"><WorkspaceRoute><QuoteDetail /></WorkspaceRoute></Route>
-      <Route path="/quotes"><WorkspaceRoute><Quotes /></WorkspaceRoute></Route>
-      <Route path="/404" component={NotFound} />
-      <Route component={NotFound} />
-    </Switch>
+    <DashboardLayout>
+      <Switch>
+        <Route path={"/"} component={ContactsPage} />
+        <Route path={"/contacts"} component={ContactsPage} />
+        <Route path={"/lists"} component={ListsPage} />
+        <Route path={"/imports/review"} component={ImportReview} />
+        <Route path={"/imports"} component={ImportsPage} />
+        <Route path={"/tasks"} component={TasksWorkspace} />
+        <Route path={"/deals"} component={DealsWorkspace} />
+        <Route path={"/pipelines"} component={PipelinesWorkspace} />
+        <Route path={"/exports"} component={ExportsPage} />
+        <Route path={"/404"} component={NotFound} />
+        <Route component={NotFound} />
+      </Switch>
+    </DashboardLayout>
   );
 }
 
-export default function App() {
+// NOTE: About Theme
+// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
+//   to keep consistent foreground/background color across components
+// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
+
+function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
-        <TooltipProvider><Toaster /><Router /></TooltipProvider>
+      <ThemeProvider
+        defaultTheme="light"
+        // switchable
+      >
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );
 }
+
+export default App;
