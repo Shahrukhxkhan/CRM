@@ -12,4 +12,4 @@
 - [x] Add automated tests, perform manual UI verification, and document how to test each delivered module.
 - [x] Add a committed-import review panel that displays persisted per-row actions and errors.
 - [x] Verify the in-project manual testing guide is present and current.
-- [ ] Commit the completed SoloFlowCRM project and push it to the connected GitHub repository.
+- [x] Commit the completed SoloFlowCRM project and push it to the connected GitHub repository.
