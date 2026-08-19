@@ -56,6 +56,7 @@ export const contacts = mysqlTable(
     normalizedEmail: varchar("normalizedEmail", { length: 320 }),
     phone: varchar("phone", { length: 64 }),
     jobTitle: varchar("jobTitle", { length: 160 }),
+    leadSource: varchar("leadSource", { length: 120 }),
     relationshipStage: varchar("relationshipStage", { length: 64 }).default("Lead").notNull(),
     archivedAt: timestamp("archivedAt"),
     mergedIntoContactId: int("mergedIntoContactId"),
@@ -66,6 +67,7 @@ export const contacts = mysqlTable(
     index("contacts_owner_normalized_email_idx").on(table.ownerId, table.normalizedEmail),
     index("contacts_owner_archived_idx").on(table.ownerId, table.archivedAt),
     index("contacts_owner_company_idx").on(table.ownerId, table.companyId),
+    index("contacts_owner_lead_source_idx").on(table.ownerId, table.leadSource),
     index("contacts_merged_into_idx").on(table.mergedIntoContactId),
   ]
 );
@@ -171,6 +173,25 @@ export const contactAttachments = mysqlTable(
   table => [index("contact_attachment_owner_contact_idx").on(table.ownerId, table.contactId)]
 );
 
+export const importMappingProfiles = mysqlTable(
+  "importMappingProfiles",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 160 }).notNull(),
+    sourceHeadersJson: text("sourceHeadersJson").notNull(),
+    mappingJson: text("mappingJson").notNull(),
+    transformsJson: text("transformsJson").notNull(),
+    duplicateStrategy: mysqlEnum("duplicateStrategy", ["create", "update", "skip"]).default("skip").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("import_mapping_profile_owner_name_unique").on(table.ownerId, table.name),
+    index("import_mapping_profile_owner_idx").on(table.ownerId),
+  ]
+);
+
 export const contactImports = mysqlTable(
   "contactImports",
   {
@@ -180,6 +201,8 @@ export const contactImports = mysqlTable(
     columnMappingJson: text("columnMappingJson").notNull(),
     duplicateStrategy: mysqlEnum("duplicateStrategy", ["create", "update", "skip"]).notNull(),
     status: mysqlEnum("status", ["preview", "completed", "reverted", "failed"]).default("preview").notNull(),
+    isValidationOnly: boolean("isValidationOnly").default(false).notNull(),
+    validationSummaryJson: text("validationSummaryJson"),
     createdCount: int("createdCount").default(0).notNull(),
     updatedCount: int("updatedCount").default(0).notNull(),
     skippedCount: int("skippedCount").default(0).notNull(),
@@ -245,6 +268,46 @@ export const scheduledExports = mysqlTable(
   ]
 );
 
+export const ownerAutomationSettings = mysqlTable(
+  "ownerAutomationSettings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    taskMonitorCronExpression: varchar("taskMonitorCronExpression", { length: 128 }).default("0 */15 * * * *").notNull(),
+    taskMonitorCronTaskUid: varchar("taskMonitorCronTaskUid", { length: 65 }),
+    taskMonitorIsActive: boolean("taskMonitorIsActive").default(false).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("owner_automation_settings_owner_unique").on(table.ownerId),
+    index("owner_automation_settings_task_uid_idx").on(table.taskMonitorCronTaskUid),
+  ]
+);
+
+export const scheduledJobRuns = mysqlTable(
+  "scheduledJobRuns",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    scheduledExportId: int("scheduledExportId").references(() => scheduledExports.id, { onDelete: "set null" }),
+    jobKind: mysqlEnum("jobKind", ["task_monitor", "scheduled_export"]).notNull(),
+    scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }).notNull(),
+    runKey: varchar("runKey", { length: 191 }).notNull(),
+    status: mysqlEnum("status", ["running", "succeeded", "failed", "skipped"]).default("running").notNull(),
+    resultJson: text("resultJson"),
+    errorMessage: text("errorMessage"),
+    startedAt: timestamp("startedAt").defaultNow().notNull(),
+    finishedAt: timestamp("finishedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("scheduled_job_run_owner_key_unique").on(table.ownerId, table.runKey),
+    index("scheduled_job_run_task_uid_idx").on(table.scheduleCronTaskUid),
+    index("scheduled_job_run_export_created_idx").on(table.scheduledExportId, table.createdAt),
+  ]
+);
+
 export const generatedExports = mysqlTable(
   "generatedExports",
   {
@@ -290,8 +353,10 @@ export const followUps = mysqlTable(
     nextOccurrenceAt: timestamp("nextOccurrenceAt"),
     reminderAt: timestamp("reminderAt"),
     reminderCronTaskUid: varchar("reminderCronTaskUid", { length: 65 }),
+    reminderNotifiedAt: timestamp("reminderNotifiedAt"),
     escalationAt: timestamp("escalationAt"),
     escalationCronTaskUid: varchar("escalationCronTaskUid", { length: 65 }),
+    escalationNotifiedAt: timestamp("escalationNotifiedAt"),
     templateId: int("templateId").references(() => taskTemplates.id, { onDelete: "set null" }),
     archivedAt: timestamp("archivedAt"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),

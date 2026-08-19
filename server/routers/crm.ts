@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, or } from "drizzle-orm";
+import { parse as parseCookie } from "cookie";
 import { z } from "zod";
 import {
   activities,
@@ -17,28 +18,41 @@ import {
   deals,
   followUps,
   generatedExports,
+  importMappingProfiles,
   lostReasons,
+  ownerAutomationSettings,
   pipelineStages,
   pipelines,
   quotes,
+  quoteItems,
   savedContactSearches,
   scheduledExports,
+  scheduledJobRuns,
   taskComments,
   taskTemplates,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { storageGet, storagePut } from "../storage";
+import { COOKIE_NAME } from "../../shared/const";
+import { createHeartbeatJob, deleteHeartbeatJob, updateHeartbeatJob } from "../_core/heartbeat";
+import { isSupportedCronExpression } from "../scheduledWork";
 import { protectedProcedure, router } from "../_core/trpc";
 
 const prioritySchema = z.enum(["low", "medium", "high", "urgent"]);
 const recurrenceSchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
+export const quoteStatusSchema = z.enum(["draft", "sent", "accepted", "declined"]);
 const fieldTypeSchema = z.enum(["text", "number", "date", "select", "multiselect", "boolean", "url"]);
+const sixFieldCronSchema = z.string().trim().max(128).refine(
+  isSupportedCronExpression,
+  "Use every 5/10/15/30 minutes, hourly, or a fixed daily/weekly UTC hour."
+);
 const contactInput = z.object({
   firstName: z.string().trim().min(1).max(120),
   lastName: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(320).optional().or(z.literal("")),
   phone: z.string().trim().max(64).optional().or(z.literal("")),
   jobTitle: z.string().trim().max(160).optional().or(z.literal("")),
+  leadSource: z.string().trim().max(120).optional().or(z.literal("")),
   companyId: z.number().int().positive().nullable().optional(),
   relationshipStage: z.string().trim().min(1).max(64).default("Lead"),
 });
@@ -50,14 +64,68 @@ const importRowSchema = z.object({
   email: z.string().trim().optional().default(""),
   phone: z.string().trim().optional().default(""),
   jobTitle: z.string().trim().optional().default(""),
+  leadSource: z.string().trim().optional().default(""),
   relationshipStage: z.string().trim().optional().default("Lead"),
 });
 
 type ImportRow = z.infer<typeof importRowSchema>;
+const importMappingSchema = z.object({
+  firstName: z.string().trim().min(1).max(160),
+  lastName: z.string().trim().min(1).max(160),
+  email: z.string().trim().max(160).optional(),
+  phone: z.string().trim().max(160).optional(),
+  jobTitle: z.string().trim().max(160).optional(),
+  leadSource: z.string().trim().max(160).optional(),
+  relationshipStage: z.string().trim().max(160).optional(),
+});
+const importTransformsSchema = z.record(z.string(), z.enum(["trim", "lowercase", "uppercase"])).default({});
+const rawImportRowSchema = z.object({ rowNumber: z.number().int().positive(), values: z.record(z.string(), z.string()) });
+type ImportMapping = z.infer<typeof importMappingSchema>;
+type ImportTransforms = z.infer<typeof importTransformsSchema>;
 
 export function normalizeEmail(email?: string | null) {
   const normalized = email?.trim().toLowerCase();
   return normalized || null;
+}
+
+export function serializeCustomFieldValue(value: unknown) {
+  return JSON.stringify(value);
+}
+
+export function calculateQuoteTotal(items: Array<{ quantity: number | string; unitAmount: number | string }>) {
+  return items.reduce((total, item) => total + Number(item.quantity) * Number(item.unitAmount), 0);
+}
+
+export function mapRawImportRows(rows: z.infer<typeof rawImportRowSchema>[], mapping: ImportMapping, transforms: ImportTransforms): ImportRow[] {
+  const valueFor = (row: z.infer<typeof rawImportRowSchema>, field: keyof ImportMapping) => {
+    const source = mapping[field];
+    let value = source ? row.values[source] ?? "" : "";
+    if (transforms[field] === "trim") value = value.trim();
+    if (transforms[field] === "lowercase") value = value.trim().toLowerCase();
+    if (transforms[field] === "uppercase") value = value.trim().toUpperCase();
+    return value;
+  };
+  return rows.map(row => ({
+    rowNumber: row.rowNumber,
+    firstName: valueFor(row, "firstName"),
+    lastName: valueFor(row, "lastName"),
+    email: valueFor(row, "email"),
+    phone: valueFor(row, "phone"),
+    jobTitle: valueFor(row, "jobTitle"),
+    leadSource: valueFor(row, "leadSource"),
+    relationshipStage: valueFor(row, "relationshipStage") || "Lead",
+  }));
+}
+
+export function buildAgingBuckets(updatedAt: Date[], now = Date.now()) {
+  const limits = [7, 14, 30];
+  return limits.map((days, index) => ({ label: index === 0 ? `0–${days} days` : `${limits[index - 1] + 1}–${days} days`, count: updatedAt.filter(date => now - date.getTime() <= days * 86400000 && (index === 0 || now - date.getTime() > limits[index - 1] * 86400000)).length })).concat([{ label: "31+ days", count: updatedAt.filter(date => now - date.getTime() > 30 * 86400000).length }]);
+}
+
+export type SourceQualityValue = { contacts: number; deals: number; wonDeals: number; amount: number; wonAmount: number };
+
+export function buildSourceQualityRows(sources: Map<string, SourceQualityValue>) {
+  return Array.from(sources.entries()).map(([source, value]) => ({ source, ...value, contactToDealConversion: value.contacts ? Math.round(value.deals / value.contacts * 100) : 0, dealWinConversion: value.deals ? Math.round(value.wonDeals / value.deals * 100) : 0 })).sort((left, right) => right.amount - left.amount || right.contacts - left.contacts);
 }
 
 function assertJson(value: string, label: string) {
@@ -91,6 +159,29 @@ async function requireOwnedCompany(ownerId: number, companyId: number | null | u
   const db = await requireDb();
   const [company] = await db.select().from(companies).where(and(eq(companies.id, companyId), eq(companies.ownerId, ownerId))).limit(1);
   if (!company) throw new TRPCError({ code: "NOT_FOUND", message: "Company not found." });
+}
+
+function sessionTokenFromRequest(headers: { cookie?: string }) {
+  return parseCookie(headers.cookie ?? "")[COOKIE_NAME] ?? "";
+}
+
+async function getOrCreateAutomationSettings(ownerId: number) {
+  const db = await requireDb();
+  const [existing] = await db.select().from(ownerAutomationSettings).where(eq(ownerAutomationSettings.ownerId, ownerId)).limit(1);
+  if (existing) return existing;
+  const [created] = await db.insert(ownerAutomationSettings).values({ ownerId }).$returningId();
+  const [settings] = await db.select().from(ownerAutomationSettings).where(eq(ownerAutomationSettings.id, created.id)).limit(1);
+  if (!settings) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not create automation settings." });
+  return settings;
+}
+
+function assertPublishedScheduling() {
+  if (process.env.NODE_ENV !== "production") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Publish the latest CRM version before enabling scheduled work.",
+    });
+  }
 }
 
 const defaultStages = [
@@ -172,6 +263,46 @@ export const crmRouter = router({
     };
   }),
 
+  reports: router({
+    overview: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      const [ownerContacts, ownerTasks, ownerImports, dealRows, stages] = await Promise.all([
+        db.select().from(contacts).where(and(eq(contacts.ownerId, ctx.user.id), isNull(contacts.archivedAt))),
+        db.select().from(followUps).where(and(eq(followUps.ownerId, ctx.user.id), isNull(followUps.archivedAt))),
+        db.select().from(contactImports).where(eq(contactImports.ownerId, ctx.user.id)).orderBy(desc(contactImports.createdAt)),
+        db.select({ deal: deals, stage: pipelineStages, lostReason: lostReasons }).from(deals).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).leftJoin(lostReasons, eq(deals.lostReasonId, lostReasons.id)).where(eq(deals.ownerId, ctx.user.id)),
+        db.select().from(pipelineStages).where(eq(pipelineStages.ownerId, ctx.user.id)).orderBy(asc(pipelineStages.position)),
+      ]);
+      const now = Date.now();
+      const contactCompleteness = {
+        total: ownerContacts.length,
+        withEmail: ownerContacts.filter(contact => Boolean(contact.email)).length,
+        withPhone: ownerContacts.filter(contact => Boolean(contact.phone)).length,
+        withCompany: ownerContacts.filter(contact => Boolean(contact.companyId)).length,
+      };
+      const contactsById = new Map(ownerContacts.map(contact => [contact.id, contact]));
+      const sources = new Map<string, { contacts: number; deals: number; wonDeals: number; amount: number; wonAmount: number }>();
+      ownerContacts.forEach(contact => { const key = contact.leadSource?.trim() || "Unspecified"; const current = sources.get(key) ?? { contacts: 0, deals: 0, wonDeals: 0, amount: 0, wonAmount: 0 }; sources.set(key, { ...current, contacts: current.contacts + 1 }); });
+      dealRows.forEach(row => { const key = contactsById.get(row.deal.contactId)?.leadSource?.trim() || "Unspecified"; const current = sources.get(key) ?? { contacts: 0, deals: 0, wonDeals: 0, amount: 0, wonAmount: 0 }; const won = row.stage.stageKind === "won"; sources.set(key, { ...current, deals: current.deals + 1, wonDeals: current.wonDeals + (won ? 1 : 0), amount: current.amount + Number(row.deal.amount), wonAmount: current.wonAmount + (won ? Number(row.deal.amount) : 0) }); });
+      const openTasks = ownerTasks.filter(task => !task.completedAt);
+      const taskHealth = {
+        open: openTasks.length,
+        overdue: openTasks.filter(task => task.dueAt && task.dueAt.getTime() < now).length,
+        completed: ownerTasks.filter(task => Boolean(task.completedAt)).length,
+        dueThisWeek: openTasks.filter(task => task.dueAt && task.dueAt.getTime() >= now && task.dueAt.getTime() <= now + 7 * 86400000).length,
+      };
+      const stageRows = stages.map(stage => {
+        const matching = dealRows.filter(row => row.stage.id === stage.id);
+        return { id: stage.id, name: stage.name, stageKind: stage.stageKind, probability: Number(stage.probability), count: matching.length, amount: matching.reduce((sum, row) => sum + Number(row.deal.amount), 0), weightedAmount: matching.filter(row => row.stage.stageKind === "open").reduce((sum, row) => sum + Number(row.deal.amount) * (Number(row.stage.probability) / 100), 0) };
+      });
+      const aging = buildAgingBuckets(dealRows.filter(row => row.stage.stageKind === "open").map(row => row.deal.updatedAt), now);
+      const reasons = new Map<string, { count: number; amount: number }>();
+      dealRows.filter(row => row.stage.stageKind === "lost").forEach(row => { const key = row.lostReason?.name ?? "No reason recorded"; const current = reasons.get(key) ?? { count: 0, amount: 0 }; reasons.set(key, { count: current.count + 1, amount: current.amount + Number(row.deal.amount) }); });
+      const importQuality = ownerImports.map(item => ({ id: item.id, filename: item.filename, createdAt: item.createdAt, validationOnly: item.isValidationOnly, created: item.createdCount, updated: item.updatedCount, skipped: item.skippedCount, errors: item.failedCount }));
+      return { contactCompleteness, taskHealth, funnel: stageRows, aging, winLoss: Array.from(reasons.entries()).map(([reason, value]) => ({ reason, ...value })), importQuality, sourceQuality: buildSourceQualityRows(sources) };
+    }),
+  }),
+
   companies: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await requireDb();
@@ -205,6 +336,28 @@ export const crmRouter = router({
       const linkedDeals = await db.select({ deal: deals, stage: pipelineStages }).from(deals).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).where(and(eq(deals.contactId, contact.id), eq(deals.ownerId, ctx.user.id))).orderBy(desc(deals.updatedAt));
       return { contact, company: company ?? null, values, attachments: attachments.map(item => ({ ...item, url: `/manus-storage/${item.storageKey}` })), timeline, linkedDeals };
     }),
+    duplicateCandidates: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      const active = await db.select().from(contacts).where(and(eq(contacts.ownerId, ctx.user.id), isNull(contacts.archivedAt), isNull(contacts.mergedIntoContactId))).orderBy(asc(contacts.normalizedEmail), desc(contacts.updatedAt));
+      const grouped = new Map<string, typeof active>();
+      for (const contact of active) if (contact.normalizedEmail) grouped.set(contact.normalizedEmail, [...(grouped.get(contact.normalizedEmail) ?? []), contact]);
+      return Array.from(grouped.entries()).filter(([, matches]) => matches.length > 1).map(([normalizedEmail, matches]) => ({ normalizedEmail, matches }));
+    }),
+    mergePreview: protectedProcedure.input(z.object({ sourceId: z.number().int().positive(), survivorId: z.number().int().positive() }).refine(input => input.sourceId !== input.survivorId, { message: "Choose two different contacts." })).query(async ({ ctx, input }) => {
+      const source = await requireOwnedContact(ctx.user.id, input.sourceId);
+      const survivor = await requireOwnedContact(ctx.user.id, input.survivorId);
+      const db = await requireDb();
+      const [activityRows, taskRows, quoteRows, attachmentRows, dealRows, valueRows, membershipRows] = await Promise.all([
+        db.select().from(activities).where(and(eq(activities.contactId, source.id), eq(activities.ownerId, ctx.user.id))),
+        db.select().from(followUps).where(and(eq(followUps.contactId, source.id), eq(followUps.ownerId, ctx.user.id))),
+        db.select().from(quotes).where(and(eq(quotes.contactId, source.id), eq(quotes.ownerId, ctx.user.id))),
+        db.select().from(contactAttachments).where(and(eq(contactAttachments.contactId, source.id), eq(contactAttachments.ownerId, ctx.user.id))),
+        db.select().from(deals).where(and(eq(deals.contactId, source.id), eq(deals.ownerId, ctx.user.id))),
+        db.select().from(contactCustomFieldValues).where(and(eq(contactCustomFieldValues.contactId, source.id), eq(contactCustomFieldValues.ownerId, ctx.user.id))),
+        db.select().from(contactListMembers).where(eq(contactListMembers.contactId, source.id)),
+      ]);
+      return { source, survivor, impact: { activities: activityRows.length, tasks: taskRows.length, quotes: quoteRows.length, attachments: attachmentRows.length, deals: dealRows.length, customValues: valueRows.length, listMemberships: membershipRows.length } };
+    }),
     create: protectedProcedure.input(contactInput).mutation(async ({ ctx, input }) => {
       await requireOwnedCompany(ctx.user.id, input.companyId);
       const db = await requireDb();
@@ -218,6 +371,7 @@ export const crmRouter = router({
         normalizedEmail,
         phone: input.phone || null,
         jobTitle: input.jobTitle || null,
+        leadSource: input.leadSource || null,
         companyId: input.companyId ?? null,
         relationshipStage: input.relationshipStage,
       }).$returningId();
@@ -228,10 +382,12 @@ export const crmRouter = router({
       await requireOwnedCompany(ctx.user.id, input.data.companyId);
       const db = await requireDb();
       const nextEmail = input.data.email === undefined ? current.email : input.data.email || null;
+      const nextLeadSource = input.data.leadSource === undefined ? current.leadSource : input.data.leadSource || null;
       await db.update(contacts).set({
         ...input.data,
         email: nextEmail,
         normalizedEmail: normalizeEmail(nextEmail),
+        leadSource: nextLeadSource,
         phone: input.data.phone === undefined ? undefined : input.data.phone || null,
         jobTitle: input.data.jobTitle === undefined ? undefined : input.data.jobTitle || null,
       }).where(and(eq(contacts.id, input.id), eq(contacts.ownerId, ctx.user.id)));
@@ -248,6 +404,26 @@ export const crmRouter = router({
       const db = await requireDb();
       await db.update(contacts).set({ archivedAt: null, mergedIntoContactId: null }).where(and(eq(contacts.id, input.id), eq(contacts.ownerId, ctx.user.id)));
       return { success: true };
+    }),
+    bulkUpdate: protectedProcedure.input(z.object({ ids: z.array(z.number().int().positive()).min(1).max(100), action: z.enum(["archive", "restore", "relationshipStage", "addToList"]), relationshipStage: z.string().trim().min(1).max(64).optional(), listId: z.number().int().positive().optional() }).superRefine((input, issue) => {
+      if (input.action === "relationshipStage" && !input.relationshipStage) issue.addIssue({ code: "custom", message: "A relationship stage is required." });
+      if (input.action === "addToList" && !input.listId) issue.addIssue({ code: "custom", message: "A static contact list is required." });
+    })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const owned = await db.select().from(contacts).where(and(eq(contacts.ownerId, ctx.user.id), inArray(contacts.id, input.ids)));
+      if (owned.length !== new Set(input.ids).size) throw new TRPCError({ code: "NOT_FOUND", message: "One or more contacts were not found." });
+      if (input.action === "archive") await db.update(contacts).set({ archivedAt: new Date() }).where(and(eq(contacts.ownerId, ctx.user.id), inArray(contacts.id, input.ids)));
+      if (input.action === "restore") await db.update(contacts).set({ archivedAt: null, mergedIntoContactId: null }).where(and(eq(contacts.ownerId, ctx.user.id), inArray(contacts.id, input.ids)));
+      if (input.action === "relationshipStage") await db.update(contacts).set({ relationshipStage: input.relationshipStage! }).where(and(eq(contacts.ownerId, ctx.user.id), inArray(contacts.id, input.ids)));
+      if (input.action === "addToList") {
+        const [list] = await db.select().from(contactLists).where(and(eq(contactLists.id, input.listId!), eq(contactLists.ownerId, ctx.user.id))).limit(1);
+        if (!list) throw new TRPCError({ code: "NOT_FOUND", message: "Static contact list not found." });
+        const memberships = await db.select().from(contactListMembers).where(and(eq(contactListMembers.listId, list.id), inArray(contactListMembers.contactId, input.ids)));
+        const memberIds = new Set(memberships.map(member => member.contactId));
+        const additions = input.ids.filter(id => !memberIds.has(id)).map(contactId => ({ listId: list.id, contactId }));
+        if (additions.length) await db.insert(contactListMembers).values(additions);
+      }
+      return { success: true, affected: owned.length };
     }),
     merge: protectedProcedure.input(z.object({ sourceId: z.number().int().positive(), survivorId: z.number().int().positive() }).refine(input => input.sourceId !== input.survivorId, { message: "Choose two different contacts." })).mutation(async ({ ctx, input }) => {
       const source = await requireOwnedContact(ctx.user.id, input.sourceId);
@@ -295,7 +471,7 @@ export const crmRouter = router({
         const db = await requireDb();
         const [definition] = await db.select().from(customFieldDefinitions).where(and(eq(customFieldDefinitions.id, input.definitionId), eq(customFieldDefinitions.ownerId, ctx.user.id), eq(customFieldDefinitions.isActive, true))).limit(1);
         if (!definition) throw new TRPCError({ code: "NOT_FOUND", message: "Custom field not found." });
-        const serialized = JSON.stringify(input.value);
+        const serialized = serializeCustomFieldValue(input.value);
         const [existing] = await db.select().from(contactCustomFieldValues).where(and(eq(contactCustomFieldValues.contactId, input.contactId), eq(contactCustomFieldValues.definitionId, input.definitionId))).limit(1);
         if (existing) await db.update(contactCustomFieldValues).set({ valueJson: serialized }).where(eq(contactCustomFieldValues.id, existing.id));
         else await db.insert(contactCustomFieldValues).values({ ownerId: ctx.user.id, contactId: input.contactId, definitionId: input.definitionId, valueJson: serialized });
@@ -380,6 +556,38 @@ export const crmRouter = router({
   }),
 
   imports: router({
+    profiles: router({
+      list: protectedProcedure.query(async ({ ctx }) => {
+        const db = await requireDb();
+        return db.select().from(importMappingProfiles).where(eq(importMappingProfiles.ownerId, ctx.user.id)).orderBy(asc(importMappingProfiles.name));
+      }),
+      create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(160), sourceHeaders: z.array(z.string().trim().min(1).max(160)).min(1).max(200), mapping: importMappingSchema, transforms: importTransformsSchema, duplicateStrategy: z.enum(["create", "update", "skip"]).default("skip") })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [created] = await db.insert(importMappingProfiles).values({ ownerId: ctx.user.id, name: input.name, sourceHeadersJson: JSON.stringify(input.sourceHeaders), mappingJson: JSON.stringify(input.mapping), transformsJson: JSON.stringify(input.transforms), duplicateStrategy: input.duplicateStrategy }).$returningId();
+        return { id: created.id };
+      }),
+      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), name: z.string().trim().min(1).max(160), sourceHeaders: z.array(z.string().trim().min(1).max(160)).min(1).max(200), mapping: importMappingSchema, transforms: importTransformsSchema, duplicateStrategy: z.enum(["create", "update", "skip"]) })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [profile] = await db.select().from(importMappingProfiles).where(and(eq(importMappingProfiles.id, input.id), eq(importMappingProfiles.ownerId, ctx.user.id))).limit(1);
+        if (!profile) throw new TRPCError({ code: "NOT_FOUND", message: "Mapping profile not found." });
+        await db.update(importMappingProfiles).set({ name: input.name, sourceHeadersJson: JSON.stringify(input.sourceHeaders), mappingJson: JSON.stringify(input.mapping), transformsJson: JSON.stringify(input.transforms), duplicateStrategy: input.duplicateStrategy }).where(eq(importMappingProfiles.id, profile.id));
+        return { success: true };
+      }),
+      remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        await db.delete(importMappingProfiles).where(and(eq(importMappingProfiles.id, input.id), eq(importMappingProfiles.ownerId, ctx.user.id)));
+        return { success: true };
+      }),
+    }),
+    validateMapped: protectedProcedure.input(z.object({ filename: z.string().trim().min(1).max(255), mapping: importMappingSchema, transforms: importTransformsSchema, duplicateStrategy: z.enum(["create", "update", "skip"]), rows: z.array(rawImportRowSchema).min(1).max(500) })).mutation(async ({ ctx, input }) => {
+      const mappedRows = mapRawImportRows(input.rows, input.mapping, input.transforms);
+      const preview = await calculateImportPreview(ctx.user.id, mappedRows, input.duplicateStrategy);
+      const summary = { totalRows: preview.length, createCount: preview.filter(row => row.action === "create").length, updateCount: preview.filter(row => row.action === "update").length, skipCount: preview.filter(row => row.action === "skip").length, errorCount: preview.filter(row => row.action === "error").length, mapping: input.mapping, transforms: input.transforms };
+      const db = await requireDb();
+      const [header] = await db.insert(contactImports).values({ ownerId: ctx.user.id, filename: input.filename, columnMappingJson: JSON.stringify(input.mapping), duplicateStrategy: input.duplicateStrategy, status: "completed", isValidationOnly: true, validationSummaryJson: JSON.stringify(summary), createdCount: 0, updatedCount: 0, skippedCount: summary.skipCount, failedCount: summary.errorCount }).$returningId();
+      if (preview.length) await db.insert(contactImportRows).values(preview.map(row => ({ importId: header.id, rowNumber: row.rowNumber, action: row.action, sourceJson: JSON.stringify(row), contactId: row.contactId ?? null, errorMessage: row.errorMessage ?? null })));
+      return { id: header.id, rows: preview, summary, hasErrors: summary.errorCount > 0 };
+    }),
     preview: protectedProcedure.input(z.object({ duplicateStrategy: z.enum(["create", "update", "skip"]), rows: z.array(importRowSchema).min(1).max(500) })).mutation(async ({ ctx, input }) => {
       const rows = await calculateImportPreview(ctx.user.id, input.rows, input.duplicateStrategy);
       return { rows, hasErrors: rows.some(row => row.action === "error") };
@@ -403,7 +611,7 @@ export const crmRouter = router({
             continue;
           }
           if (row.action === "create") {
-            const [created] = await tx.insert(contacts).values({ ownerId: ctx.user.id, firstName: row.firstName, lastName: row.lastName, email: row.email || null, normalizedEmail: row.normalizedEmail, phone: row.phone || null, jobTitle: row.jobTitle || null, relationshipStage: row.relationshipStage || "Lead" }).$returningId();
+            const [created] = await tx.insert(contacts).values({ ownerId: ctx.user.id, firstName: row.firstName, lastName: row.lastName, email: row.email || null, normalizedEmail: row.normalizedEmail, phone: row.phone || null, jobTitle: row.jobTitle || null, leadSource: row.leadSource || null, relationshipStage: row.relationshipStage || "Lead" }).$returningId();
             createdCount += 1;
             await tx.insert(contactImportRows).values({ importId: header.id, rowNumber: row.rowNumber, action: "create", sourceJson, contactId: created.id });
             await tx.insert(contactImportChanges).values({ importId: header.id, contactId: created.id, action: "create", beforeJson: null, afterJson: JSON.stringify(row) });
@@ -411,7 +619,7 @@ export const crmRouter = router({
           }
           const [before] = await tx.select().from(contacts).where(and(eq(contacts.id, row.contactId!), eq(contacts.ownerId, ctx.user.id))).limit(1);
           if (!before) throw new TRPCError({ code: "NOT_FOUND", message: `Contact matched by row ${row.rowNumber} no longer exists.` });
-          await tx.update(contacts).set({ firstName: row.firstName, lastName: row.lastName, email: row.email || null, normalizedEmail: row.normalizedEmail, phone: row.phone || null, jobTitle: row.jobTitle || null, relationshipStage: row.relationshipStage || "Lead" }).where(eq(contacts.id, before.id));
+          await tx.update(contacts).set({ firstName: row.firstName, lastName: row.lastName, email: row.email || null, normalizedEmail: row.normalizedEmail, phone: row.phone || null, jobTitle: row.jobTitle || null, leadSource: row.leadSource || null, relationshipStage: row.relationshipStage || "Lead" }).where(eq(contacts.id, before.id));
           updatedCount += 1;
           await tx.insert(contactImportRows).values({ importId: header.id, rowNumber: row.rowNumber, action: "update", sourceJson, contactId: before.id });
           await tx.insert(contactImportChanges).values({ importId: header.id, contactId: before.id, action: "update", beforeJson: JSON.stringify(before), afterJson: JSON.stringify(row) });
@@ -462,6 +670,58 @@ export const crmRouter = router({
     }),
   }),
 
+  automation: router({
+    status: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      const settings = await getOrCreateAutomationSettings(ctx.user.id);
+      const runs = await db.select().from(scheduledJobRuns).where(eq(scheduledJobRuns.ownerId, ctx.user.id)).orderBy(desc(scheduledJobRuns.createdAt)).limit(50);
+      return { settings, runs };
+    }),
+    saveTaskMonitor: protectedProcedure.input(z.object({ cronExpression: sixFieldCronSchema })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const settings = await getOrCreateAutomationSettings(ctx.user.id);
+      if (settings.taskMonitorCronTaskUid) {
+        await updateHeartbeatJob(settings.taskMonitorCronTaskUid, { cron: input.cronExpression }, sessionTokenFromRequest(ctx.req.headers));
+      }
+      await db.update(ownerAutomationSettings).set({ taskMonitorCronExpression: input.cronExpression }).where(eq(ownerAutomationSettings.id, settings.id));
+      return { success: true };
+    }),
+    enableTaskMonitor: protectedProcedure.mutation(async ({ ctx }) => {
+      assertPublishedScheduling();
+      const db = await requireDb();
+      const settings = await getOrCreateAutomationSettings(ctx.user.id);
+      const sessionToken = sessionTokenFromRequest(ctx.req.headers);
+      let taskUid = settings.taskMonitorCronTaskUid;
+      if (taskUid) {
+        await updateHeartbeatJob(taskUid, { enable: true, cron: settings.taskMonitorCronExpression }, sessionToken);
+      } else {
+        const job = await createHeartbeatJob({
+          name: `crm-task-monitor-${ctx.user.id}`,
+          cron: settings.taskMonitorCronExpression,
+          path: "/api/scheduled/task-monitor",
+          description: "Processes due SoloFlowCRM task reminders and escalations.",
+        }, sessionToken);
+        taskUid = job.taskUid;
+      }
+      await db.update(ownerAutomationSettings).set({ taskMonitorCronTaskUid: taskUid, taskMonitorIsActive: true }).where(eq(ownerAutomationSettings.id, settings.id));
+      return { success: true, taskUid };
+    }),
+    pauseTaskMonitor: protectedProcedure.mutation(async ({ ctx }) => {
+      const db = await requireDb();
+      const settings = await getOrCreateAutomationSettings(ctx.user.id);
+      if (settings.taskMonitorCronTaskUid) await updateHeartbeatJob(settings.taskMonitorCronTaskUid, { enable: false }, sessionTokenFromRequest(ctx.req.headers));
+      await db.update(ownerAutomationSettings).set({ taskMonitorIsActive: false }).where(eq(ownerAutomationSettings.id, settings.id));
+      return { success: true };
+    }),
+    removeTaskMonitor: protectedProcedure.mutation(async ({ ctx }) => {
+      const db = await requireDb();
+      const settings = await getOrCreateAutomationSettings(ctx.user.id);
+      if (settings.taskMonitorCronTaskUid) await deleteHeartbeatJob(settings.taskMonitorCronTaskUid, sessionTokenFromRequest(ctx.req.headers));
+      await db.update(ownerAutomationSettings).set({ taskMonitorCronTaskUid: null, taskMonitorIsActive: false }).where(eq(ownerAutomationSettings.id, settings.id));
+      return { success: true };
+    }),
+  }),
+
   exports: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await requireDb();
@@ -469,11 +729,49 @@ export const crmRouter = router({
       const files = await db.select().from(generatedExports).where(eq(generatedExports.ownerId, ctx.user.id)).orderBy(desc(generatedExports.createdAt));
       return { configurations, files: files.map(file => ({ ...file, url: `/manus-storage/${file.storageKey}` })) };
     }),
-    createConfiguration: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(160), criteriaJson: z.string().trim().min(2).max(10_000), cronExpression: z.string().trim().min(9).max(128) })).mutation(async ({ ctx, input }) => {
+    createConfiguration: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(160), criteriaJson: z.string().trim().min(2).max(10_000), cronExpression: sixFieldCronSchema })).mutation(async ({ ctx, input }) => {
       assertJson(input.criteriaJson, "Export criteria");
       const db = await requireDb();
       const [created] = await db.insert(scheduledExports).values({ ownerId: ctx.user.id, name: input.name, criteriaJson: input.criteriaJson, cronExpression: input.cronExpression, isActive: false }).$returningId();
       return { id: created.id, note: "Saved as inactive until deployed scheduling is explicitly enabled." };
+    }),
+    enableConfiguration: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      assertPublishedScheduling();
+      const db = await requireDb();
+      const [configuration] = await db.select().from(scheduledExports).where(and(eq(scheduledExports.id, input.id), eq(scheduledExports.ownerId, ctx.user.id))).limit(1);
+      if (!configuration) throw new TRPCError({ code: "NOT_FOUND", message: "Export configuration not found." });
+      if (!isSupportedCronExpression(configuration.cronExpression)) throw new TRPCError({ code: "BAD_REQUEST", message: "Update this legacy export configuration to a supported cron expression before enabling it." });
+      const sessionToken = sessionTokenFromRequest(ctx.req.headers);
+      let taskUid = configuration.scheduleCronTaskUid;
+      if (taskUid) {
+        await updateHeartbeatJob(taskUid, { enable: true, cron: configuration.cronExpression }, sessionToken);
+      } else {
+        const job = await createHeartbeatJob({
+          name: `crm-export-${configuration.id}`,
+          cron: configuration.cronExpression,
+          path: "/api/scheduled/export",
+          description: `Generates the SoloFlowCRM export: ${configuration.name}.`,
+        }, sessionToken);
+        taskUid = job.taskUid;
+      }
+      await db.update(scheduledExports).set({ scheduleCronTaskUid: taskUid, isActive: true }).where(eq(scheduledExports.id, configuration.id));
+      return { success: true, taskUid };
+    }),
+    pauseConfiguration: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [configuration] = await db.select().from(scheduledExports).where(and(eq(scheduledExports.id, input.id), eq(scheduledExports.ownerId, ctx.user.id))).limit(1);
+      if (!configuration) throw new TRPCError({ code: "NOT_FOUND", message: "Export configuration not found." });
+      if (configuration.scheduleCronTaskUid) await updateHeartbeatJob(configuration.scheduleCronTaskUid, { enable: false }, sessionTokenFromRequest(ctx.req.headers));
+      await db.update(scheduledExports).set({ isActive: false }).where(eq(scheduledExports.id, configuration.id));
+      return { success: true };
+    }),
+    removeConfigurationSchedule: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [configuration] = await db.select().from(scheduledExports).where(and(eq(scheduledExports.id, input.id), eq(scheduledExports.ownerId, ctx.user.id))).limit(1);
+      if (!configuration) throw new TRPCError({ code: "NOT_FOUND", message: "Export configuration not found." });
+      if (configuration.scheduleCronTaskUid) await deleteHeartbeatJob(configuration.scheduleCronTaskUid, sessionTokenFromRequest(ctx.req.headers));
+      await db.update(scheduledExports).set({ scheduleCronTaskUid: null, isActive: false }).where(eq(scheduledExports.id, configuration.id));
+      return { success: true };
     }),
     generateNow: protectedProcedure.input(z.object({ scheduledExportId: z.number().int().positive().optional(), includeArchived: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
       const db = await requireDb();
@@ -489,6 +787,111 @@ export const crmRouter = router({
       const stored = await storagePut(`crm/${ctx.user.id}/exports/${filename}`, csv, "text/csv");
       const [created] = await db.insert(generatedExports).values({ ownerId: ctx.user.id, scheduledExportId: input.scheduledExportId ?? null, storageKey: stored.key, filename }).$returningId();
       return { id: created.id, url: stored.url, filename };
+    }),
+  }),
+
+  quotes: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      return db.select({ quote: quotes, contact: contacts, deal: deals }).from(quotes)
+        .leftJoin(contacts, eq(quotes.contactId, contacts.id))
+        .leftJoin(deals, eq(quotes.dealId, deals.id))
+        .where(eq(quotes.ownerId, ctx.user.id)).orderBy(desc(quotes.updatedAt));
+    }),
+    detail: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [record] = await db.select({ quote: quotes, contact: contacts, deal: deals }).from(quotes)
+        .leftJoin(contacts, eq(quotes.contactId, contacts.id))
+        .leftJoin(deals, eq(quotes.dealId, deals.id))
+        .where(and(eq(quotes.id, input.id), eq(quotes.ownerId, ctx.user.id))).limit(1);
+      if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Quote not found." });
+      const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, record.quote.id)).orderBy(asc(quoteItems.createdAt));
+      return { ...record, items, calculatedTotal: calculateQuoteTotal(items) };
+    }),
+    create: protectedProcedure.input(z.object({
+      title: z.string().trim().min(1).max(255),
+      contactId: z.number().int().positive().nullable().optional(),
+      companyId: z.number().int().positive().nullable().optional(),
+      dealId: z.number().int().positive().nullable().optional(),
+      items: z.array(z.object({ description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000) })).default([]),
+    })).mutation(async ({ ctx, input }) => {
+      if (input.contactId) await requireOwnedContact(ctx.user.id, input.contactId);
+      const db = await requireDb();
+      if (input.companyId) {
+        const [company] = await db.select().from(companies).where(and(eq(companies.id, input.companyId), eq(companies.ownerId, ctx.user.id))).limit(1);
+        if (!company) throw new TRPCError({ code: "NOT_FOUND", message: "Company not found." });
+      }
+      if (input.dealId) {
+        const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id))).limit(1);
+        if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+      }
+      const totalAmount = calculateQuoteTotal(input.items).toFixed(2);
+      const [created] = await db.insert(quotes).values({ ownerId: ctx.user.id, title: input.title, contactId: input.contactId ?? null, companyId: input.companyId ?? null, dealId: input.dealId ?? null, totalAmount }).$returningId();
+      if (input.items.length) await db.insert(quoteItems).values(input.items.map(item => ({ quoteId: created.id, description: item.description, quantity: item.quantity.toFixed(2), unitAmount: item.unitAmount.toFixed(2) })));
+      return { id: created.id };
+    }),
+    update: protectedProcedure.input(z.object({
+      id: z.number().int().positive(),
+      title: z.string().trim().min(1).max(255),
+      contactId: z.number().int().positive().nullable().optional(),
+      companyId: z.number().int().positive().nullable().optional(),
+      dealId: z.number().int().positive().nullable().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      if (input.contactId) await requireOwnedContact(ctx.user.id, input.contactId);
+      const db = await requireDb();
+      const [quote] = await db.select().from(quotes).where(and(eq(quotes.id, input.id), eq(quotes.ownerId, ctx.user.id))).limit(1);
+      if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Quote not found." });
+      if (input.companyId) {
+        const [company] = await db.select().from(companies).where(and(eq(companies.id, input.companyId), eq(companies.ownerId, ctx.user.id))).limit(1);
+        if (!company) throw new TRPCError({ code: "NOT_FOUND", message: "Company not found." });
+      }
+      if (input.dealId) {
+        const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id))).limit(1);
+        if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+      }
+      await db.update(quotes).set({ title: input.title, contactId: input.contactId ?? null, companyId: input.companyId ?? null, dealId: input.dealId ?? null }).where(eq(quotes.id, quote.id));
+      return { success: true };
+    }),
+    updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status: quoteStatusSchema })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const result = await db.update(quotes).set({ status: input.status }).where(and(eq(quotes.id, input.id), eq(quotes.ownerId, ctx.user.id)));
+      if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Quote not found." });
+      return { success: true };
+    }),
+    remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const result = await db.delete(quotes).where(and(eq(quotes.id, input.id), eq(quotes.ownerId, ctx.user.id)));
+      if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Quote not found." });
+      return { success: true };
+    }),
+    items: router({
+      add: protectedProcedure.input(z.object({ quoteId: z.number().int().positive(), description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000) })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [quote] = await db.select().from(quotes).where(and(eq(quotes.id, input.quoteId), eq(quotes.ownerId, ctx.user.id))).limit(1);
+        if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Quote not found." });
+        const [created] = await db.insert(quoteItems).values({ quoteId: quote.id, description: input.description, quantity: input.quantity.toFixed(2), unitAmount: input.unitAmount.toFixed(2) }).$returningId();
+        const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, quote.id));
+        await db.update(quotes).set({ totalAmount: calculateQuoteTotal(items).toFixed(2) }).where(eq(quotes.id, quote.id));
+        return { id: created.id };
+      }),
+      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000) })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [item] = await db.select({ item: quoteItems, quote: quotes }).from(quoteItems).innerJoin(quotes, eq(quoteItems.quoteId, quotes.id)).where(and(eq(quoteItems.id, input.id), eq(quotes.ownerId, ctx.user.id))).limit(1);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Quote item not found." });
+        await db.update(quoteItems).set({ description: input.description, quantity: input.quantity.toFixed(2), unitAmount: input.unitAmount.toFixed(2) }).where(eq(quoteItems.id, item.item.id));
+        const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, item.quote.id));
+        await db.update(quotes).set({ totalAmount: calculateQuoteTotal(items).toFixed(2) }).where(eq(quotes.id, item.quote.id));
+        return { success: true };
+      }),
+      remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [item] = await db.select({ item: quoteItems, quote: quotes }).from(quoteItems).innerJoin(quotes, eq(quoteItems.quoteId, quotes.id)).where(and(eq(quoteItems.id, input.id), eq(quotes.ownerId, ctx.user.id))).limit(1);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Quote item not found." });
+        await db.delete(quoteItems).where(eq(quoteItems.id, item.item.id));
+        const remaining = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, item.quote.id));
+        await db.update(quotes).set({ totalAmount: calculateQuoteTotal(remaining).toFixed(2) }).where(eq(quotes.id, item.quote.id));
+        return { success: true };
+      }),
     }),
   }),
 
@@ -657,6 +1060,15 @@ export const crmRouter = router({
       const [created] = await db.insert(deals).values({ ownerId: ctx.user.id, contactId: input.contactId, companyId: input.companyId ?? null, pipelineId: pipeline.id, stageId: stage.id, title: input.title, amount: input.amount.toFixed(2), expectedCloseAt: input.expectedCloseAt ?? null, closedAt: stage.stageKind === "open" ? null : new Date() }).$returningId();
       await db.insert(dealStageHistory).values({ ownerId: ctx.user.id, dealId: created.id, fromStageId: null, toStageId: stage.id });
       return { id: created.id };
+    }),
+    update: protectedProcedure.input(z.object({ id: z.number().int().positive(), contactId: z.number().int().positive().optional(), companyId: z.number().int().positive().nullable().optional(), title: z.string().trim().min(1).max(255).optional(), amount: z.number().min(0).max(999_999_999_999).optional(), expectedCloseAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.id), eq(deals.ownerId, ctx.user.id))).limit(1);
+      if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+      if (input.contactId) await requireOwnedContact(ctx.user.id, input.contactId);
+      if (input.companyId !== undefined) await requireOwnedCompany(ctx.user.id, input.companyId);
+      await db.update(deals).set({ contactId: input.contactId ?? undefined, companyId: input.companyId === undefined ? undefined : input.companyId, title: input.title, amount: input.amount === undefined ? undefined : input.amount.toFixed(2), expectedCloseAt: input.expectedCloseAt === undefined ? undefined : input.expectedCloseAt }).where(eq(deals.id, deal.id));
+      return { success: true };
     }),
     move: protectedProcedure.input(z.object({ dealId: z.number().int().positive(), stageId: z.number().int().positive(), lostReasonId: z.number().int().positive().nullable().optional(), lostNote: z.string().trim().max(5000).optional() })).mutation(async ({ ctx, input }) => {
       const db = await requireDb();

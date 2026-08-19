@@ -6,11 +6,11 @@ Create a company on **Contacts**, then create two contacts sharing the same emai
 
 ## CSV imports and exports
 
-On **Imports**, select a CSV with `firstName,lastName,email,phone,jobTitle,relationshipStage` headers. Preview before committing; invalid rows prevent commit. After a successful commit, inspect its counters and use **Undo import** to archive imported contacts or restore update snapshots. Open `/imports/review` to inspect the persisted per-row action, contact reference, source data, and error detail for any import. On **Exports**, generate a CSV immediately and verify it appears in export history; configuration records remain inactive until deployed scheduling is explicitly enabled.
+On **Imports**, select a CSV with `firstName,lastName,email,phone,jobTitle,relationshipStage` headers. Preview before committing; invalid rows prevent commit. After a successful commit, inspect its counters and use **Undo import** to archive imported contacts or restore update snapshots. Open `/imports/review` to inspect the persisted per-row action, contact reference, source data, and error detail for any import. On **Exports**, generate a CSV immediately and verify it appears in export history. Create a saved export schedule, publish the latest project version, then enable it from **Scheduled export controls**; verify each generated file and job outcome is retained in history.
 
 ## Tasks
 
-Create a simple task, complete it, and verify it leaves the open list. Create a recurring task with reminder or escalation timestamps in the advanced panel, then complete it to confirm the current record remains completed while a next occurrence is created. Add a task template, select a task, and add comments. The seven-day calendar is derived from stored task due dates.
+Create a simple task, complete it, and verify it leaves the open list. Create a recurring task with reminder or escalation timestamps in the advanced panel, then complete it to confirm the current record remains completed while a next occurrence is created. Add a task template, select a task, and add comments. The seven-day calendar is derived from stored task due dates. After publishing the latest version, enable **Reliable follow-through**, create a task with a due reminder or escalation, and verify the in-app notification and an idempotent job-history record. Pause the monitor and verify that no new task-monitor work runs.
 
 ## Deals and pipelines
 
@@ -18,4 +18,4 @@ Create a contact, then create a deal. In **Pipelines**, review the seeded six-st
 
 ## Automated checks
 
-Run `pnpm check` for TypeScript validation and `pnpm test` for the unit suite. The current tests cover normalized email matching and recurring-task next-occurrence calculation, alongside the scaffolded authentication logout test.
+Run `pnpm check` for TypeScript validation and `pnpm test` for the unit suite. The current tests cover normalized email matching, recurring-task next-occurrence calculation, scheduled-work idempotency windows, and the scaffolded authentication logout test.

@@ -17,17 +17,61 @@
 - [x] Create, validate, and deliver a reusable SoloFlowCRM delivery workflow skill.
 - [x] Test the reusable Solo CRM Delivery skill against a representative sample project prompt.
 - [x] Provide a prioritized roadmap of recommended next features for SoloFlowCRM.
-- [ ] Implement reliable follow-through: reminders, escalations, scheduled exports, job history, and retry-safe execution.
-- [ ] Add schedule ownership, idempotency, status, and execution-history persistence for task reminders, escalations, and exports.
-- [ ] Add protected owner controls to create, pause, resume, and remove reminder/escalation/export schedules.
-- [ ] Add authenticated scheduled endpoints that run reminder, escalation, and export work idempotently with retry-safe job records.
-- [ ] Build owner-facing job-history and scheduled-work controls in the Tasks and Exports sections.
-- [ ] Add focused test coverage for scheduled-work ownership, idempotency, and execution outcomes.
-- [ ] Add comprehensive contact and deal editing, bulk actions, duplicate review, merge preview, and multiselect custom-field UX.
-- [ ] Add configurable CSV mapping, transforms, mapping profiles, validation-only reporting, and duplicate-resolution support.
-- [ ] Build CRM reporting for pipeline aging, forecast, conversion, work completion, overdue follow-ups, source quality, and import errors.
+- [x] Implement reliable follow-through: reminders, escalations, scheduled exports, job history, and retry-safe execution.
+- [x] Add schedule ownership, idempotency, status, and execution-history persistence for task reminders, escalations, and exports.
+- [x] Add protected owner controls to create, pause, resume, and remove reminder/escalation/export schedules.
+- [x] Add authenticated scheduled endpoints that run reminder, escalation, and export work idempotently with retry-safe job records.
+- [x] Build owner-facing job-history and scheduled-work controls in the Tasks and Exports sections.
+- [x] Add focused test coverage for scheduled-work ownership, idempotency, and execution outcomes.
+- [x] Add comprehensive contact and deal editing, bulk actions, duplicate review, merge preview, and multiselect custom-field UX.
+- [x] Add validated owner-scoped editing for contacts and deals.
+- [x] Add duplicate-candidate discovery and a merge impact preview before survivor selection.
+- [x] Add bulk contact archive, restore, relationship-stage, and static-list actions.
+- [x] Replace single-select handling with true multiselect custom-field controls.
+- [x] Update every contact custom-field editor to save multiselect values as arrays.
+- [x] Show unset multiselect definitions in the data-management editor and verify both contact editing flows.
+- [x] Render every multiselect definition, including unset values, in the data-management contact editor.
+- [x] Remove the obsolete legacy contact-detail editor and verify all contact custom-field workflows use array-based multiselect values.
+- [x] Run fresh visual and automated verification for both contact editing flows.
+- [ ] Add focused multiselect custom-field persistence coverage for the contact-detail and data-management editing flows.
+- [ ] Manually exercise and verify multiselect saves/reloads in both contact editing workflows.
+- [x] Add configurable CSV mapping, transforms, mapping profiles, validation-only reporting, and duplicate-resolution support.
+- [x] Add owner-scoped import mapping profiles and durable validation-report metadata after schema approval.
+- [x] Add configurable field mapping, transforms, and duplicate-resolution controls to the CSV import flow.
+- [x] Generate and apply the approved import mapping-profile and validation-summary database migration.
+- [x] Add validated profile CRUD and mapped validation-only import procedures.
+- [x] Build the owner-facing mapping, transform, duplicate-resolution, and validation-report import controls.
+- [x] Add focused import mapping and validation-only workflow test coverage.
+- [x] Add editable mapping profile updates and full owner-facing transform controls.
+- [x] Replace the naive mapping CSV parser with robust quoted-value parsing.
+- [ ] Add mapped validation persistence, duplicate-resolution, and profile lifecycle test coverage.
+- [ ] Revalidate the complete import data-quality workflow after the profile and parsing fixes.
+- [x] Build CRM reporting for pipeline aging, forecast, conversion, work completion, overdue follow-ups, source quality, and import errors.
+- [x] Add owner-scoped report queries for pipeline funnel, aging, win/loss, task health, source quality, and import quality.
+- [ ] Build a reporting workspace with date-aware metrics and drill-down tables.
+- [x] Add focused report-calculation test coverage and visual verification.
+- [x] Add the approved lead-source field and migration for source-quality reporting.
+- [x] Add lead-source controls to contacts and mapped CSV imports.
+- [x] Add source volume, conversion, and revenue metrics to the CRM reporting dashboard.
+- [x] Add lead-source entry to the primary contact creation workflow.
+- [x] Compute and display explicit source conversion metrics in the reporting dashboard.
+- [ ] Add focused lead-source persistence and source-quality calculation coverage, then re-verify Contacts and Imports.
 - [ ] Add calendar/email communication capture and configurable automation rules after integrations are connected.
-- [ ] Build the quote workflow on the existing quote and quote-item data foundation.
+- [x] Build the quote workflow on the existing quote and quote-item data foundation.
+- [x] Add owner-scoped quote creation, editing, status, and line-item calculations.
+- [x] Add a quote workspace within existing Deals navigation without changing the required sidebar sections.
+- [x] Add quote total/status test coverage and validate the commercial workflow.
 - [ ] Add collaboration workspaces and role-aware assignment only when the product expands beyond the solo-owner model.
 - [ ] Validate, checkpoint, and push the completed roadmap changes to GitHub.
 - [x] Push the current saved roadmap, review, skill-test, and tracker updates to GitHub before continuing automation work.
+- [x] Launch SoloFlowCRM and verify its live preview.
+- [x] Produce a comprehensive, prioritized catalogue of next-level SoloFlowCRM additions.
+- [x] Begin the attached next-level feature catalogue with a schema-approved implementation milestone.
+- [x] Replace fixed-window scheduled-work run keys with invocation-safe idempotency keys that support every accepted cron frequency.
+- [x] Add automated coverage for cron-only authorization, owner-bound schedule lookup, successful runs, failed retries, and duplicate-run behavior.
+- [x] Revalidate reliable follow-through correctness before checkpointing the milestone.
+- [x] Align accepted task/export cron expressions with cron-aware idempotency support.
+- [x] Add execution-level scheduled callback tests for orphan lookup, duplicate skip, and failed-run retry.
+- [x] Revalidate reliable follow-through correctness after cron and callback test coverage fixes.
+- [x] Revalidate persisted export cron expressions before schedule activation or execution.
+- [x] Complete fresh UI and database verification after the final scheduling fixes.
