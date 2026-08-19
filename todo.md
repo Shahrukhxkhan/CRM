@@ -48,7 +48,7 @@
 - [ ] Revalidate the complete import data-quality workflow after the profile and parsing fixes.
 - [x] Build CRM reporting for pipeline aging, forecast, conversion, work completion, overdue follow-ups, source quality, and import errors.
 - [x] Add owner-scoped report queries for pipeline funnel, aging, win/loss, task health, source quality, and import quality.
-- [ ] Build a reporting workspace with date-aware metrics and drill-down tables.
+- [x] Build a reporting workspace with date-aware metrics and drill-down tables.
 - [x] Add focused report-calculation test coverage and visual verification.
 - [x] Add the approved lead-source field and migration for source-quality reporting.
 - [x] Add lead-source controls to contacts and mapped CSV imports.

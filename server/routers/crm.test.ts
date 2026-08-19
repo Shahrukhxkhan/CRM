@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAgingBuckets, buildSourceQualityRows, calculateQuoteTotal, mapRawImportRows, nextDueDate, normalizeEmail, quoteStatusSchema, serializeCustomFieldValue } from "./crm";
+import { buildAgingBuckets, buildSourceQualityRows, calculateQuoteTotal, classifyImportRows, isValidReportRange, mapRawImportRows, nextDueDate, normalizeEmail, quoteStatusSchema, resolveLeadSource, serializeCustomFieldValue } from "./crm";
 import { isCronOnlyCaller, makeRunKey, shouldRetryRunStatus } from "../scheduledWork";
 
 describe("CRM duplicate detection", () => {
@@ -7,6 +7,14 @@ describe("CRM duplicate detection", () => {
     expect(normalizeEmail("  Ada.Lovelace@Example.COM ")).toBe("ada.lovelace@example.com");
     expect(normalizeEmail(" ")).toBeNull();
     expect(normalizeEmail(null)).toBeNull();
+  });
+});
+
+describe("lead-source persistence", () => {
+  it("normalizes create, retain, and clear behavior for owner-scoped contact writes", () => {
+    expect(resolveLeadSource(null, "Referral")).toBe("Referral");
+    expect(resolveLeadSource("Referral", undefined)).toBe("Referral");
+    expect(resolveLeadSource("Referral", "")).toBeNull();
   });
 });
 
@@ -37,6 +45,23 @@ describe("CSV mapping profiles", () => {
 
     expect(rows[0]).toMatchObject({ rowNumber: 2, firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", leadSource: "Referral", relationshipStage: "Lead" });
   });
+
+  it("preserves the mapped lead source while applying the selected duplicate outcome", () => {
+    const [existing] = classifyImportRows([
+      { rowNumber: 2, firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", phone: "", jobTitle: "", leadSource: "Referral", relationshipStage: "Lead" },
+    ], "update", new Map([["ada@example.com", { id: 42, normalizedEmail: "ada@example.com" }]]));
+
+    expect(existing).toMatchObject({ action: "update", contactId: 42, leadSource: "Referral" });
+  });
+
+  it("flags duplicate normalized emails within a mapped CSV before any contact write", () => {
+    const rows = classifyImportRows([
+      { rowNumber: 2, firstName: "Ada", lastName: "Lovelace", email: "ADA@example.com", phone: "", jobTitle: "", leadSource: "Referral", relationshipStage: "Lead" },
+      { rowNumber: 3, firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", phone: "", jobTitle: "", leadSource: "Referral", relationshipStage: "Lead" },
+    ], "create", new Map());
+
+    expect(rows[1]).toMatchObject({ action: "error", errorMessage: "Duplicate email appears more than once in this CSV." });
+  });
 });
 
 describe("CRM reporting", () => {
@@ -61,6 +86,12 @@ describe("CRM reporting", () => {
       expect.objectContaining({ source: "Event", contactToDealConversion: 33, dealWinConversion: 0 }),
       expect.objectContaining({ source: "Referral", contactToDealConversion: 50, dealWinConversion: 75 }),
     ]);
+  });
+
+  it("accepts an open or chronological reporting range and rejects an inverted range", () => {
+    expect(isValidReportRange()).toBe(true);
+    expect(isValidReportRange(new Date("2026-01-01"), new Date("2026-01-31"))).toBe(true);
+    expect(isValidReportRange(new Date("2026-02-01"), new Date("2026-01-31"))).toBe(false);
   });
 });
 

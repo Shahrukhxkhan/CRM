@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, like, lte, or } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { z } from "zod";
 import {
@@ -128,6 +128,14 @@ export function buildSourceQualityRows(sources: Map<string, SourceQualityValue>)
   return Array.from(sources.entries()).map(([source, value]) => ({ source, ...value, contactToDealConversion: value.contacts ? Math.round(value.deals / value.contacts * 100) : 0, dealWinConversion: value.deals ? Math.round(value.wonDeals / value.deals * 100) : 0 })).sort((left, right) => right.amount - left.amount || right.contacts - left.contacts);
 }
 
+export function isValidReportRange(startAt?: Date, endAt?: Date) {
+  return !startAt || !endAt || startAt <= endAt;
+}
+
+export function resolveLeadSource(current: string | null, next?: string) {
+  return next === undefined ? current : next || null;
+}
+
 function assertJson(value: string, label: string) {
   try {
     return JSON.parse(value) as unknown;
@@ -210,15 +218,11 @@ async function ensureDefaultPipeline(ownerId: number) {
   return pipeline!;
 }
 
-async function calculateImportPreview(ownerId: number, rows: ImportRow[], duplicateStrategy: "create" | "update" | "skip") {
-  const emails = Array.from(new Set(rows.map(row => normalizeEmail(row.email)).filter((email): email is string => Boolean(email))));
-  const db = await requireDb();
-  const existing = emails.length
-    ? await db.select().from(contacts).where(and(eq(contacts.ownerId, ownerId), inArray(contacts.normalizedEmail, emails), isNull(contacts.archivedAt)))
-    : [];
-  const existingByEmail = new Map(existing.filter(contact => contact.normalizedEmail).map(contact => [contact.normalizedEmail!, contact]));
-  const seenEmails = new Set<string>();
+export type ImportDuplicateStrategy = "create" | "update" | "skip";
+export type ExistingImportContact = { id: number; normalizedEmail: string | null };
 
+export function classifyImportRows(rows: ImportRow[], duplicateStrategy: ImportDuplicateStrategy, existingByEmail: Map<string, ExistingImportContact>) {
+  const seenEmails = new Set<string>();
   return rows.map(row => {
     const normalizedEmail = normalizeEmail(row.email);
     if (!row.firstName || !row.lastName) {
@@ -237,6 +241,16 @@ async function calculateImportPreview(ownerId: number, rows: ImportRow[], duplic
     if (duplicateStrategy === "skip") return { ...row, normalizedEmail, action: "skip" as const, contactId: match.id, errorMessage: undefined };
     return { ...row, normalizedEmail, action: "create" as const, contactId: undefined, errorMessage: undefined };
   });
+}
+
+async function calculateImportPreview(ownerId: number, rows: ImportRow[], duplicateStrategy: ImportDuplicateStrategy) {
+  const emails = Array.from(new Set(rows.map(row => normalizeEmail(row.email)).filter((email): email is string => Boolean(email))));
+  const db = await requireDb();
+  const existing = emails.length
+    ? await db.select().from(contacts).where(and(eq(contacts.ownerId, ownerId), inArray(contacts.normalizedEmail, emails), isNull(contacts.archivedAt)))
+    : [];
+  const existingByEmail = new Map(existing.filter(contact => contact.normalizedEmail).map(contact => [contact.normalizedEmail!, { id: contact.id, normalizedEmail: contact.normalizedEmail }]));
+  return classifyImportRows(rows, duplicateStrategy, existingByEmail);
 }
 
 export function nextDueDate(dueAt: Date | null, recurrenceRule: "DAILY" | "WEEKLY" | "MONTHLY") {
@@ -264,13 +278,18 @@ export const crmRouter = router({
   }),
 
   reports: router({
-    overview: protectedProcedure.query(async ({ ctx }) => {
+    overview: protectedProcedure.input(z.object({ startAt: z.date().optional(), endAt: z.date().optional() }).optional()).query(async ({ ctx, input }) => {
+      if (!isValidReportRange(input?.startAt, input?.endAt)) throw new TRPCError({ code: "BAD_REQUEST", message: "The reporting start date must be on or before the end date." });
       const db = await requireDb();
+      const contactFilters = [eq(contacts.ownerId, ctx.user.id), isNull(contacts.archivedAt), ...(input?.startAt ? [gte(contacts.createdAt, input.startAt)] : []), ...(input?.endAt ? [lte(contacts.createdAt, input.endAt)] : [])];
+      const taskFilters = [eq(followUps.ownerId, ctx.user.id), isNull(followUps.archivedAt), ...(input?.startAt ? [gte(followUps.createdAt, input.startAt)] : []), ...(input?.endAt ? [lte(followUps.createdAt, input.endAt)] : [])];
+      const importFilters = [eq(contactImports.ownerId, ctx.user.id), ...(input?.startAt ? [gte(contactImports.createdAt, input.startAt)] : []), ...(input?.endAt ? [lte(contactImports.createdAt, input.endAt)] : [])];
+      const dealFilters = [eq(deals.ownerId, ctx.user.id), ...(input?.startAt ? [gte(deals.createdAt, input.startAt)] : []), ...(input?.endAt ? [lte(deals.createdAt, input.endAt)] : [])];
       const [ownerContacts, ownerTasks, ownerImports, dealRows, stages] = await Promise.all([
-        db.select().from(contacts).where(and(eq(contacts.ownerId, ctx.user.id), isNull(contacts.archivedAt))),
-        db.select().from(followUps).where(and(eq(followUps.ownerId, ctx.user.id), isNull(followUps.archivedAt))),
-        db.select().from(contactImports).where(eq(contactImports.ownerId, ctx.user.id)).orderBy(desc(contactImports.createdAt)),
-        db.select({ deal: deals, stage: pipelineStages, lostReason: lostReasons }).from(deals).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).leftJoin(lostReasons, eq(deals.lostReasonId, lostReasons.id)).where(eq(deals.ownerId, ctx.user.id)),
+        db.select().from(contacts).where(and(...contactFilters)),
+        db.select().from(followUps).where(and(...taskFilters)),
+        db.select().from(contactImports).where(and(...importFilters)).orderBy(desc(contactImports.createdAt)),
+        db.select({ deal: deals, stage: pipelineStages, lostReason: lostReasons }).from(deals).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).leftJoin(lostReasons, eq(deals.lostReasonId, lostReasons.id)).where(and(...dealFilters)),
         db.select().from(pipelineStages).where(eq(pipelineStages.ownerId, ctx.user.id)).orderBy(asc(pipelineStages.position)),
       ]);
       const now = Date.now();
@@ -299,7 +318,9 @@ export const crmRouter = router({
       const reasons = new Map<string, { count: number; amount: number }>();
       dealRows.filter(row => row.stage.stageKind === "lost").forEach(row => { const key = row.lostReason?.name ?? "No reason recorded"; const current = reasons.get(key) ?? { count: 0, amount: 0 }; reasons.set(key, { count: current.count + 1, amount: current.amount + Number(row.deal.amount) }); });
       const importQuality = ownerImports.map(item => ({ id: item.id, filename: item.filename, createdAt: item.createdAt, validationOnly: item.isValidationOnly, created: item.createdCount, updated: item.updatedCount, skipped: item.skippedCount, errors: item.failedCount }));
-      return { contactCompleteness, taskHealth, funnel: stageRows, aging, winLoss: Array.from(reasons.entries()).map(([reason, value]) => ({ reason, ...value })), importQuality, sourceQuality: buildSourceQualityRows(sources) };
+      const recentDeals = dealRows.slice().sort((left, right) => right.deal.updatedAt.getTime() - left.deal.updatedAt.getTime()).slice(0, 8).map(row => ({ id: row.deal.id, title: row.deal.title, stage: row.stage.name, amount: Number(row.deal.amount), updatedAt: row.deal.updatedAt }));
+      const overdueTasks = openTasks.filter(task => task.dueAt && task.dueAt.getTime() < now).sort((left, right) => (left.dueAt?.getTime() ?? 0) - (right.dueAt?.getTime() ?? 0)).slice(0, 8).map(task => ({ id: task.id, title: task.title, priority: task.priority, dueAt: task.dueAt }));
+      return { range: { startAt: input?.startAt ?? null, endAt: input?.endAt ?? null }, contactCompleteness, taskHealth, funnel: stageRows, aging, winLoss: Array.from(reasons.entries()).map(([reason, value]) => ({ reason, ...value })), importQuality, sourceQuality: buildSourceQualityRows(sources), recentDeals, overdueTasks };
     }),
   }),
 
@@ -371,7 +392,7 @@ export const crmRouter = router({
         normalizedEmail,
         phone: input.phone || null,
         jobTitle: input.jobTitle || null,
-        leadSource: input.leadSource || null,
+        leadSource: resolveLeadSource(null, input.leadSource),
         companyId: input.companyId ?? null,
         relationshipStage: input.relationshipStage,
       }).$returningId();
@@ -382,7 +403,7 @@ export const crmRouter = router({
       await requireOwnedCompany(ctx.user.id, input.data.companyId);
       const db = await requireDb();
       const nextEmail = input.data.email === undefined ? current.email : input.data.email || null;
-      const nextLeadSource = input.data.leadSource === undefined ? current.leadSource : input.data.leadSource || null;
+      const nextLeadSource = resolveLeadSource(current.leadSource, input.data.leadSource);
       await db.update(contacts).set({
         ...input.data,
         email: nextEmail,
