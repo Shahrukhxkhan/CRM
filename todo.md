@@ -62,11 +62,52 @@
 - [x] Add a quote workspace within existing Deals navigation without changing the required sidebar sections.
 - [x] Add quote total/status test coverage and validate the commercial workflow.
 - [ ] Add collaboration workspaces and role-aware assignment only when the product expands beyond the solo-owner model.
-- [ ] Validate, checkpoint, and push the completed roadmap changes to GitHub.
+- [x] Define and obtain approval for the communication-account, activity-capture, team-membership, and assignment schema.
+- [x] Apply the approved Google Calendar, communication-capture, membership, assignment, and automation schema migration.
+- [x] Add owner-admin workspace membership and role-aware record assignment without changing the required sidebar sections.
+- [ ] Enforce distinct manager and contributor permissions for workspace assignment coordination.
+- [ ] Verify that assigned members access only their permitted work while owners retain workspace administration.
+- [ ] Add communication capture, contact/deal activity linking, and owner-controlled follow-up automation after a provider is connected.
+- [ ] Configure the approved Google Calendar provider connection and validate authorization before enabling any capture workflow.
+- [ ] Add focused collaboration permissions, assignment, activity-linking, and automation test coverage.
+- [x] Validate, checkpoint, and push the completed roadmap changes to GitHub.
 - [x] Push the current saved roadmap, review, skill-test, and tracker updates to GitHub before continuing automation work.
 - [x] Launch SoloFlowCRM and verify its live preview.
 - [x] Produce a comprehensive, prioritized catalogue of next-level SoloFlowCRM additions.
 - [x] Begin the attached next-level feature catalogue with a schema-approved implementation milestone.
+- [x] Define and obtain approval for the additive Contact 360° timeline and relationship-summary data model.
+- [x] Build a Contact 360° workspace inside the existing Contacts section with linked tasks, deals, quotes, activities, imports, attachments, and calendar events.
+- [ ] Add focused Contact 360° aggregation coverage and visually verify the owner-scoped detail workflow.
+- [x] Confirm Contact 360° requires no schema migration and add the owner-scoped aggregation contract over existing CRM relationships.
+- [x] Embed the Contact 360° relationship snapshot and filterable unified timeline in the selected-contact workspace.
+- [x] Add deterministic Contact 360° summary coverage; automated validation passes with 27 tests and zero TypeScript errors.
+- [x] Include all owner-scoped standard contact activities in Contact 360° alongside calendar events, then add aggregation coverage.
+- [x] Add a mixed-source Contact 360° timeline test proving standard activities and captured calendar events are ordered and non-duplicated.
+- [ ] Visually exercise Contact 360° against a real existing contact with linked CRM records when available.
+- [x] Define and obtain approval for owner-scoped saved table views and the global-search result contract.
+- [x] Build Global Search across contacts, companies, deals, tasks, quotes, and activities inside the existing workspace navigation.
+- [ ] Build saved table views for Contacts, Tasks, and Deals with owner-scoped filters, sort, columns, and grouping preferences.
+- [ ] Add focused search/view validation coverage and visually verify the owner-scoped workflows.
+- [ ] Add user-facing visible-column and grouping controls to Saved Views for Contacts, Tasks, and Deals.
+- [ ] Add focused Global Search entity-matching/owner-isolation coverage and Saved View lifecycle coverage.
+- [ ] Visually exercise Global Search results and Saved View create, apply, and remove workflows with real records.
+- [ ] Apply saved visible-column preferences to Tasks and Deals list rendering.
+- [ ] Apply saved grouping preferences to Contacts, Tasks, and Deals list rendering, or remove unsupported grouping controls.
+- [ ] Add focused coverage that saved view columns and grouping are restored after a view is loaded.
+- [x] Define and obtain approval for owner-scoped products, price-book entries, and deal/quote line-item catalog references.
+- [ ] Build owner-managed product and price-book controls within the existing Deals workspace.
+- [ ] Add catalog-backed deal and quote line items with snapshot pricing, discounts, taxes, and recalculated totals.
+- [ ] Extend quote item create, update, and total refresh procedures for catalog references, discount, tax, and snapshot totals.
+- [ ] Add product selection and discount/tax controls to the existing quote workflow without removing free-form line items.
+- [x] Add catalog-backed deal line items with owner-scoped pricing snapshots, discount/tax calculations, and deal-total recalculation.
+- [x] Add deterministic catalog-backed line and quote-summary pricing calculation coverage; automated validation passes with 33 tests and zero TypeScript errors.
+- [ ] Add product edit, activation/deactivation, and archive controls with owner-scoped validation.
+- [ ] Add price-book entry edit, activation/deactivation, and effective-date management controls.
+- [ ] Add focused product/price-book update/deactivation coverage and visual verification.
+- [ ] Update initial quote creation to persist commercial snapshot fields and quote subtotal, discount, tax, and grand-total values.
+- [ ] Extend the primary quote create/edit controls with product selection and discount/tax inputs while retaining free-form line items.
+- [ ] Add focused initial-quote and quote-item update/remove commercial snapshot coverage.
+- [ ] Add focused catalog/pricing calculation coverage and visually verify the commercial workflow.
 - [x] Replace fixed-window scheduled-work run keys with invocation-safe idempotency keys that support every accepted cron frequency.
 - [x] Add automated coverage for cron-only authorization, owner-bound schedule lookup, successful runs, failed retries, and duplicate-run behavior.
 - [x] Revalidate reliable follow-through correctness before checkpointing the milestone.

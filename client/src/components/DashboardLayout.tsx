@@ -21,11 +21,13 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { ContactRound, Download, FileUp, ListFilter, LogOut, PanelLeft, Workflow, CheckSquare } from "lucide-react";
+import { ContactRound, Download, FileUp, ListFilter, LogOut, PanelLeft, Search, Workflow, CheckSquare } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { trpc } from "@/lib/trpc";
 
 const menuItems = [
   { icon: ContactRound, label: "Contacts", path: "/contacts" },
@@ -104,6 +106,14 @@ type DashboardLayoutContentProps = {
   children: React.ReactNode;
   setSidebarWidth: (width: number) => void;
 };
+
+function GlobalSearch() {
+  const [query, setQuery] = useState("");
+  const [, setLocation] = useLocation();
+  const search = trpc.crm.search.global.useQuery({ query, limit: 12 }, { enabled: query.trim().length >= 2 });
+  const results = search.data ?? [];
+  return <div className="relative w-full max-w-xl"><div className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"/><Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search contacts, companies, deals, tasks, quotes, and activities…" className="h-9 pl-9 text-sm" aria-label="Global CRM search"/></div>{query.trim().length >= 2 && <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"><div className="max-h-80 overflow-auto">{results.map(result => <button key={result.id} type="button" className="flex w-full items-start gap-3 border-b px-3 py-3 text-left last:border-b-0 hover:bg-muted" onClick={() => { setLocation(result.targetPath); setQuery(""); }}><span className="mt-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">{result.kind}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{result.title}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{result.context}</span></span></button>)}{search.isFetching && <p className="px-3 py-4 text-sm text-muted-foreground">Searching…</p>}{!search.isFetching && !results.length && <p className="px-3 py-4 text-sm text-muted-foreground">No owner-scoped records match this search.</p>}</div></div>}</div>;
+}
 
 function DashboardLayoutContent({
   children,
@@ -246,6 +256,7 @@ function DashboardLayoutContent({
       </div>
 
       <SidebarInset>
+        <div className="flex min-h-14 items-center border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:backdrop-blur"><GlobalSearch/></div>
         {isMobile && (
           <div className="flex border-b h-14 items-center justify-between bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
             <div className="flex items-center gap-2">

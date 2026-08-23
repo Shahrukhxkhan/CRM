@@ -36,6 +36,34 @@
       "when": 1787133254264,
       "tag": "0004_premium_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1787165486021,
+      "tag": "0005_romantic_charles_xavier",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787165574872,
+      "tag": "0006_curious_black_widow",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787477843445,
+      "tag": "0007_mushy_war_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787479181220,
+      "tag": "0008_cuddly_sway",
+      "breakpoints": true
     }
   ]
 }

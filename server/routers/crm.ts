@@ -1,10 +1,13 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, like, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, like, lte, ne, or } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { z } from "zod";
 import {
   activities,
+  capturedCommunications,
   companies,
+  communicationAutomationRules,
+  communicationConnections,
   contactAttachments,
   contactCustomFieldValues,
   contactImportChanges,
@@ -14,6 +17,7 @@ import {
   contactLists,
   contacts,
   customFieldDefinitions,
+  dealLineItems,
   dealStageHistory,
   deals,
   followUps,
@@ -23,13 +27,18 @@ import {
   ownerAutomationSettings,
   pipelineStages,
   pipelines,
+  priceBookEntries,
+  products,
   quotes,
   quoteItems,
   savedContactSearches,
+  savedTableViews,
   scheduledExports,
   scheduledJobRuns,
   taskComments,
   taskTemplates,
+  users,
+  workspaceMembers,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { storageGet, storagePut } from "../storage";
@@ -42,6 +51,21 @@ const prioritySchema = z.enum(["low", "medium", "high", "urgent"]);
 const recurrenceSchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
 export const quoteStatusSchema = z.enum(["draft", "sent", "accepted", "declined"]);
 const fieldTypeSchema = z.enum(["text", "number", "date", "select", "multiselect", "boolean", "url"]);
+const savedViewEntitySchema = z.enum(["contacts", "tasks", "deals"]);
+const savedViewConfigSchema = z.object({
+  filters: z.record(z.string(), z.union([z.string().max(160), z.boolean(), z.array(z.string().max(120)).max(20)])).default({}),
+  sort: z.object({ field: z.string().trim().min(1).max(48), direction: z.enum(["asc", "desc"]) }).default({ field: "updatedAt", direction: "desc" }),
+  columns: z.array(z.string().trim().min(1).max(48)).max(12).default([]),
+  groupBy: z.string().trim().max(48).nullable().optional(),
+});
+
+export function parseSavedViewConfig(configJson: string) {
+  return savedViewConfigSchema.parse(JSON.parse(configJson));
+}
+
+export function sortGlobalSearchResults<T extends { occurredAt: Date }>(results: T[], limit: number) {
+  return [...results].sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime()).slice(0, limit);
+}
 const sixFieldCronSchema = z.string().trim().max(128).refine(
   isSupportedCronExpression,
   "Use every 5/10/15/30 minutes, hourly, or a fixed daily/weekly UTC hour."
@@ -94,6 +118,18 @@ export function serializeCustomFieldValue(value: unknown) {
 
 export function calculateQuoteTotal(items: Array<{ quantity: number | string; unitAmount: number | string }>) {
   return items.reduce((total, item) => total + Number(item.quantity) * Number(item.unitAmount), 0);
+}
+
+export function calculateCommercialLine(input: { quantity: number | string; unitAmount: number | string; discountPercent?: number | string; taxPercent?: number | string }) {
+  const subtotal = Number(input.quantity) * Number(input.unitAmount);
+  const discountAmount = subtotal * (Number(input.discountPercent ?? 0) / 100);
+  const taxableAmount = subtotal - discountAmount;
+  const taxAmount = taxableAmount * (Number(input.taxPercent ?? 0) / 100);
+  return { subtotal, discountAmount, taxAmount, total: taxableAmount + taxAmount };
+}
+
+export function calculateCommercialSummary(items: Array<{ quantity: number | string; unitAmount: number | string; discountPercent?: number | string | null; taxPercent?: number | string | null }>) {
+  return items.reduce((summary, item) => { const line = calculateCommercialLine({ ...item, discountPercent: item.discountPercent ?? 0, taxPercent: item.taxPercent ?? 0 }); return { subtotal: summary.subtotal + line.subtotal, discountAmount: summary.discountAmount + line.discountAmount, taxAmount: summary.taxAmount + line.taxAmount, total: summary.total + line.total }; }, { subtotal: 0, discountAmount: 0, taxAmount: 0, total: 0 });
 }
 
 export function mapRawImportRows(rows: z.infer<typeof rawImportRowSchema>[], mapping: ImportMapping, transforms: ImportTransforms): ImportRow[] {
@@ -160,6 +196,62 @@ async function requireOwnedContact(ownerId: number, contactId: number) {
   const [contact] = await db.select().from(contacts).where(and(eq(contacts.id, contactId), eq(contacts.ownerId, ownerId))).limit(1);
   if (!contact) throw new TRPCError({ code: "NOT_FOUND", message: "Contact not found." });
   return contact;
+}
+
+export function canAssignWorkspaceUser(ownerId: number, userId: number, membership?: { isActive: boolean } | null) {
+  return userId === ownerId || Boolean(membership?.isActive);
+}
+
+export function canCoordinateWorkspace(ownerId: number, userId: number, membership?: { isActive: boolean; workspaceRole: "manager" | "contributor" } | null) {
+  return userId === ownerId || Boolean(membership?.isActive && membership.workspaceRole === "manager");
+}
+
+export function canActivateCalendarAutomation(connectionStatus: "disconnected" | "connected" | "error") {
+  return connectionStatus === "connected";
+}
+
+export function buildContact360Summary(input: { deals: Array<{ amount: string | number; closedAt: Date | null }>; quotes: Array<{ totalAmount: string | number }>; tasks: Array<{ completedAt: Date | null; dueAt: Date | null }> }) {
+  const openTasks = input.tasks.filter(task => !task.completedAt);
+  const nextDueTask = openTasks.filter(task => task.dueAt).sort((left, right) => left.dueAt!.getTime() - right.dueAt!.getTime())[0] ?? null;
+  return {
+    dealCount: input.deals.length,
+    openDealCount: input.deals.filter(deal => !deal.closedAt).length,
+    totalDealValue: input.deals.reduce((sum, deal) => sum + Number(deal.amount), 0),
+    quoteCount: input.quotes.length,
+    totalQuotedValue: input.quotes.reduce((sum, quote) => sum + Number(quote.totalAmount), 0),
+    openTaskCount: openTasks.length,
+    nextDueAt: nextDueTask?.dueAt ?? null,
+  };
+}
+
+export function isContact360StandardActivityType(activityType: string | null) {
+  return activityType !== "calendar_event";
+}
+
+export function buildContact360ActivityTimeline(
+  activities: Array<{ activity: { id: number; activityType: string | null; occurredAt: Date; body: string }; dealTitle: string | null }>,
+  calendarEvents: Array<{ event: { id: number; startsAt: Date | null; createdAt: Date; title: string; descriptionSnippet: string | null }; dealTitle: string | null }>
+) {
+  return [
+    ...activities.map(({ activity, dealTitle }) => ({ id: `activity-${activity.id}`, kind: "activity" as const, occurredAt: activity.occurredAt, title: activity.activityType || "activity", description: activity.body, dealTitle })),
+    ...calendarEvents.map(({ event, dealTitle }) => ({ id: `calendar-${event.id}`, kind: "calendar" as const, occurredAt: event.startsAt ?? event.createdAt, title: event.title, description: event.descriptionSnippet ?? "Linked Google Calendar event", dealTitle })),
+  ].sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime());
+}
+
+async function requireAssignableUser(ownerId: number, userId: number) {
+  if (canAssignWorkspaceUser(ownerId, userId)) return { id: ownerId };
+  const db = await requireDb();
+  const [membership] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.ownerId, ownerId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.isActive, true))).limit(1);
+  if (!canAssignWorkspaceUser(ownerId, userId, membership)) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose an active workspace member or the workspace owner." });
+  return membership;
+}
+
+async function requireWorkspaceCoordinator(ownerId: number, userId: number) {
+  if (canCoordinateWorkspace(ownerId, userId)) return { ownerId, userId, workspaceRole: "manager" as const, isActive: true };
+  const db = await requireDb();
+  const [membership] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.ownerId, ownerId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.isActive, true))).limit(1);
+  if (!canCoordinateWorkspace(ownerId, userId, membership)) throw new TRPCError({ code: "FORBIDDEN", message: "Only the workspace owner or an active manager can coordinate assignments." });
+  return membership;
 }
 
 async function requireOwnedCompany(ownerId: number, companyId: number | null | undefined) {
@@ -262,6 +354,48 @@ export function nextDueDate(dueAt: Date | null, recurrenceRule: "DAILY" | "WEEKL
 }
 
 export const crmRouter = router({
+  search: router({
+    global: protectedProcedure.input(z.object({ query: z.string().trim().max(160), limit: z.number().int().min(1).max(50).default(24) })).query(async ({ ctx, input }) => {
+      if (!input.query) return [];
+      const db = await requireDb(); const term = `%${input.query}%`;
+      const [contactRows, companyRows, dealRows, taskRows, quoteRows, activityRows] = await Promise.all([
+        db.select({ id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName, email: contacts.email, updatedAt: contacts.updatedAt }).from(contacts).where(and(eq(contacts.ownerId, ctx.user.id), isNull(contacts.mergedIntoContactId), or(like(contacts.firstName, term), like(contacts.lastName, term), like(contacts.email, term))!)).orderBy(desc(contacts.updatedAt)),
+        db.select({ id: companies.id, name: companies.name, website: companies.website, updatedAt: companies.updatedAt }).from(companies).where(and(eq(companies.ownerId, ctx.user.id), or(like(companies.name, term), like(companies.website, term))!)).orderBy(desc(companies.updatedAt)),
+        db.select({ id: deals.id, title: deals.title, amount: deals.amount, updatedAt: deals.updatedAt }).from(deals).where(and(eq(deals.ownerId, ctx.user.id), like(deals.title, term))).orderBy(desc(deals.updatedAt)),
+        db.select({ id: followUps.id, title: followUps.title, priority: followUps.priority, dueAt: followUps.dueAt, updatedAt: followUps.updatedAt }).from(followUps).where(and(eq(followUps.ownerId, ctx.user.id), isNull(followUps.archivedAt), like(followUps.title, term))).orderBy(desc(followUps.updatedAt)),
+        db.select({ id: quotes.id, title: quotes.title, status: quotes.status, totalAmount: quotes.totalAmount, updatedAt: quotes.updatedAt }).from(quotes).where(and(eq(quotes.ownerId, ctx.user.id), like(quotes.title, term))).orderBy(desc(quotes.updatedAt)),
+        db.select({ id: activities.id, activityType: activities.activityType, body: activities.body, occurredAt: activities.occurredAt }).from(activities).where(and(eq(activities.ownerId, ctx.user.id), like(activities.body, term))).orderBy(desc(activities.occurredAt)),
+      ]);
+      return sortGlobalSearchResults([
+        ...contactRows.map(row => ({ id: `contact-${row.id}`, kind: "contact" as const, title: `${row.firstName} ${row.lastName}`, context: row.email ?? "Contact", occurredAt: row.updatedAt, targetPath: "/contacts" })),
+        ...companyRows.map(row => ({ id: `company-${row.id}`, kind: "company" as const, title: row.name, context: row.website ?? "Company", occurredAt: row.updatedAt, targetPath: "/contacts" })),
+        ...dealRows.map(row => ({ id: `deal-${row.id}`, kind: "deal" as const, title: row.title, context: `$${Number(row.amount).toFixed(2)}`, occurredAt: row.updatedAt, targetPath: "/deals" })),
+        ...taskRows.map(row => ({ id: `task-${row.id}`, kind: "task" as const, title: row.title, context: `${row.priority} priority${row.dueAt ? ` · due ${row.dueAt.toLocaleDateString()}` : ""}`, occurredAt: row.updatedAt, targetPath: "/tasks" })),
+        ...quoteRows.map(row => ({ id: `quote-${row.id}`, kind: "quote" as const, title: row.title, context: `${row.status} · $${Number(row.totalAmount).toFixed(2)}`, occurredAt: row.updatedAt, targetPath: "/deals" })),
+        ...activityRows.map(row => ({ id: `activity-${row.id}`, kind: "activity" as const, title: row.activityType ?? "Activity", context: row.body, occurredAt: row.occurredAt, targetPath: "/contacts" })),
+      ], input.limit);
+    }),
+  }),
+  views: router({
+    list: protectedProcedure.input(z.object({ entityType: savedViewEntitySchema })).query(async ({ ctx, input }) => {
+      const db = await requireDb(); const rows = await db.select().from(savedTableViews).where(and(eq(savedTableViews.ownerId, ctx.user.id), eq(savedTableViews.entityType, input.entityType))).orderBy(desc(savedTableViews.isPinned), asc(savedTableViews.name));
+      return rows.map(row => ({ ...row, config: parseSavedViewConfig(row.configJson) }));
+    }),
+    create: protectedProcedure.input(z.object({ entityType: savedViewEntitySchema, name: z.string().trim().min(1).max(160), config: savedViewConfigSchema, isPinned: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      try { const [created] = await db.insert(savedTableViews).values({ ownerId: ctx.user.id, entityType: input.entityType, name: input.name, configJson: JSON.stringify(input.config), isPinned: input.isPinned }).$returningId(); return { id: created.id }; }
+      catch { throw new TRPCError({ code: "CONFLICT", message: "A saved view with this name already exists for that workspace." }); }
+    }),
+    update: protectedProcedure.input(z.object({ id: z.number().int().positive(), name: z.string().trim().min(1).max(160).optional(), config: savedViewConfigSchema.optional(), isPinned: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb(); const { id, ...changes } = input; const patch: Partial<typeof savedTableViews.$inferInsert> = {};
+      if (changes.name !== undefined) patch.name = changes.name;
+      if (changes.config !== undefined) patch.configJson = JSON.stringify(changes.config);
+      if (changes.isPinned !== undefined) patch.isPinned = changes.isPinned;
+      if (!Object.keys(patch).length) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide at least one saved-view change." });
+      const result = await db.update(savedTableViews).set(patch).where(and(eq(savedTableViews.id, id), eq(savedTableViews.ownerId, ctx.user.id))); if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Saved view not found." }); return { ok: true };
+    }),
+    remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const result = await db.delete(savedTableViews).where(and(eq(savedTableViews.id, input.id), eq(savedTableViews.ownerId, ctx.user.id))); if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Saved view not found." }); return { ok: true }; }),
+  }),
   dashboard: protectedProcedure.query(async ({ ctx }) => {
     const db = await requireDb();
     await ensureDefaultPipeline(ctx.user.id);
@@ -324,6 +458,173 @@ export const crmRouter = router({
     }),
   }),
 
+  workspace: router({
+    listMembers: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      return db.select({ membership: workspaceMembers, user: users }).from(workspaceMembers).innerJoin(users, eq(workspaceMembers.userId, users.id)).where(eq(workspaceMembers.ownerId, ctx.user.id)).orderBy(desc(workspaceMembers.isActive), asc(users.name));
+    }),
+    addMember: protectedProcedure.input(z.object({ email: z.string().trim().email().max(320), workspaceRole: z.enum(["manager", "contributor"]).default("contributor") })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [user] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+      if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "That person must sign in to SoloFlowCRM before they can be added to this workspace." });
+      if (user.id === ctx.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "The workspace owner already has administrator access." });
+      const [existing] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.ownerId, ctx.user.id), eq(workspaceMembers.userId, user.id))).limit(1);
+      if (existing) {
+        await db.update(workspaceMembers).set({ workspaceRole: input.workspaceRole, isActive: true, acceptedAt: new Date() }).where(eq(workspaceMembers.id, existing.id));
+        return { id: existing.id, reactivated: true };
+      }
+      const [created] = await db.insert(workspaceMembers).values({ ownerId: ctx.user.id, userId: user.id, workspaceRole: input.workspaceRole }).$returningId();
+      return { id: created.id, reactivated: false };
+    }),
+    updateMember: protectedProcedure.input(z.object({ id: z.number().int().positive(), workspaceRole: z.enum(["manager", "contributor"]).optional(), isActive: z.boolean().optional() }).refine(input => input.workspaceRole !== undefined || input.isActive !== undefined, { message: "Choose a role or active state to update." })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [member] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.id, input.id), eq(workspaceMembers.ownerId, ctx.user.id))).limit(1);
+      if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace member not found." });
+      await db.update(workspaceMembers).set({ workspaceRole: input.workspaceRole, isActive: input.isActive }).where(eq(workspaceMembers.id, member.id));
+      return { success: true };
+    }),
+    assignTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), assigneeUserId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [task] = await db.select().from(followUps).where(and(eq(followUps.id, input.taskId), eq(followUps.ownerId, ctx.user.id))).limit(1);
+      if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found." });
+      if (input.assigneeUserId) await requireAssignableUser(ctx.user.id, input.assigneeUserId);
+      await db.update(followUps).set({ assigneeUserId: input.assigneeUserId }).where(eq(followUps.id, task.id));
+      return { success: true };
+    }),
+    assignDeal: protectedProcedure.input(z.object({ dealId: z.number().int().positive(), assigneeUserId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id))).limit(1);
+      if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+      if (input.assigneeUserId) await requireAssignableUser(ctx.user.id, input.assigneeUserId);
+      await db.update(deals).set({ assigneeUserId: input.assigneeUserId }).where(eq(deals.id, deal.id));
+      return { success: true };
+    }),
+    manageableWork: protectedProcedure.input(z.object({ workspaceOwnerId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      await requireWorkspaceCoordinator(input.workspaceOwnerId, ctx.user.id);
+      const db = await requireDb();
+      const [tasks, workspaceDeals, members] = await Promise.all([
+        db.select({ task: followUps, contact: contacts }).from(followUps).leftJoin(contacts, eq(followUps.contactId, contacts.id)).where(and(eq(followUps.ownerId, input.workspaceOwnerId), isNull(followUps.archivedAt))).orderBy(asc(followUps.dueAt)),
+        db.select({ deal: deals, contact: contacts, stage: pipelineStages }).from(deals).innerJoin(contacts, eq(deals.contactId, contacts.id)).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).where(eq(deals.ownerId, input.workspaceOwnerId)).orderBy(desc(deals.updatedAt)),
+        db.select({ membership: workspaceMembers, user: users }).from(workspaceMembers).innerJoin(users, eq(workspaceMembers.userId, users.id)).where(and(eq(workspaceMembers.ownerId, input.workspaceOwnerId), eq(workspaceMembers.isActive, true))).orderBy(asc(users.name)),
+      ]);
+      return { tasks, deals: workspaceDeals, members };
+    }),
+    coordinateTaskAssignment: protectedProcedure.input(z.object({ workspaceOwnerId: z.number().int().positive(), taskId: z.number().int().positive(), assigneeUserId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => {
+      await requireWorkspaceCoordinator(input.workspaceOwnerId, ctx.user.id);
+      const db = await requireDb();
+      const [task] = await db.select().from(followUps).where(and(eq(followUps.id, input.taskId), eq(followUps.ownerId, input.workspaceOwnerId))).limit(1);
+      if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found." });
+      if (input.assigneeUserId) await requireAssignableUser(input.workspaceOwnerId, input.assigneeUserId);
+      await db.update(followUps).set({ assigneeUserId: input.assigneeUserId }).where(eq(followUps.id, task.id));
+      return { success: true };
+    }),
+    coordinateDealAssignment: protectedProcedure.input(z.object({ workspaceOwnerId: z.number().int().positive(), dealId: z.number().int().positive(), assigneeUserId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => {
+      await requireWorkspaceCoordinator(input.workspaceOwnerId, ctx.user.id);
+      const db = await requireDb();
+      const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, input.workspaceOwnerId))).limit(1);
+      if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+      if (input.assigneeUserId) await requireAssignableUser(input.workspaceOwnerId, input.assigneeUserId);
+      await db.update(deals).set({ assigneeUserId: input.assigneeUserId }).where(eq(deals.id, deal.id));
+      return { success: true };
+    }),
+    myAssignedWork: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      const memberships = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.userId, ctx.user.id), eq(workspaceMembers.isActive, true)));
+      const assignments = await Promise.all(memberships.map(async membership => {
+        const [tasks, dealsForMember] = await Promise.all([
+          db.select({ task: followUps, contact: contacts }).from(followUps).leftJoin(contacts, eq(followUps.contactId, contacts.id)).where(and(eq(followUps.ownerId, membership.ownerId), eq(followUps.assigneeUserId, ctx.user.id), isNull(followUps.archivedAt))).orderBy(asc(followUps.dueAt)),
+          db.select({ deal: deals, contact: contacts, stage: pipelineStages }).from(deals).innerJoin(contacts, eq(deals.contactId, contacts.id)).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).where(and(eq(deals.ownerId, membership.ownerId), eq(deals.assigneeUserId, ctx.user.id))).orderBy(desc(deals.updatedAt)),
+        ]);
+        return { workspaceOwnerId: membership.ownerId, workspaceRole: membership.workspaceRole, canCoordinate: membership.workspaceRole === "manager", tasks, deals: dealsForMember };
+      }));
+      return assignments;
+    }),
+    addAssignedTaskComment: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), body: z.string().trim().min(1).max(5000) })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const [task] = await db.select().from(followUps).where(and(eq(followUps.id, input.taskId), eq(followUps.assigneeUserId, ctx.user.id), isNull(followUps.archivedAt))).limit(1);
+      if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Assigned task not found." });
+      const [membership] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.ownerId, task.ownerId), eq(workspaceMembers.userId, ctx.user.id), eq(workspaceMembers.isActive, true))).limit(1);
+      if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "You no longer have access to this workspace." });
+      const [created] = await db.insert(taskComments).values({ ownerId: task.ownerId, followUpId: task.id, authorUserId: ctx.user.id, body: input.body }).$returningId();
+      return { id: created.id };
+    }),
+  }),
+
+  calendar: router({
+    connection: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      const [connection] = await db.select().from(communicationConnections).where(and(eq(communicationConnections.ownerId, ctx.user.id), eq(communicationConnections.provider, "google_calendar"))).limit(1);
+      return connection ?? { id: null, provider: "google_calendar" as const, connectionStatus: "disconnected" as const, externalAccountEmail: null, lastSyncedAt: null, lastSyncError: null };
+    }),
+    ensureConnection: protectedProcedure.mutation(async ({ ctx }) => {
+      const db = await requireDb();
+      const [existing] = await db.select().from(communicationConnections).where(and(eq(communicationConnections.ownerId, ctx.user.id), eq(communicationConnections.provider, "google_calendar"))).limit(1);
+      if (existing) return existing;
+      const [created] = await db.insert(communicationConnections).values({ ownerId: ctx.user.id, provider: "google_calendar", connectionStatus: "disconnected" }).$returningId();
+      const [connection] = await db.select().from(communicationConnections).where(eq(communicationConnections.id, created.id)).limit(1);
+      return connection!;
+    }),
+    listCaptured: protectedProcedure.query(async ({ ctx }) => {
+      const db = await requireDb();
+      return db.select({ capture: capturedCommunications, contact: contacts, deal: deals }).from(capturedCommunications).leftJoin(contacts, eq(capturedCommunications.contactId, contacts.id)).leftJoin(deals, eq(capturedCommunications.dealId, deals.id)).where(eq(capturedCommunications.ownerId, ctx.user.id)).orderBy(desc(capturedCommunications.startsAt), desc(capturedCommunications.createdAt));
+    }),
+    captureEvent: protectedProcedure.input(z.object({ contactId: z.number().int().positive(), dealId: z.number().int().positive().nullable().optional(), title: z.string().trim().min(1).max(512), descriptionSnippet: z.string().trim().max(1000).optional(), startsAt: z.date().nullable().optional(), endsAt: z.date().nullable().optional(), externalEventId: z.string().trim().max(512).optional(), externalCalendarId: z.string().trim().max(512).optional(), providerUpdatedAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      await requireOwnedContact(ctx.user.id, input.contactId);
+      const db = await requireDb();
+      if (input.dealId) {
+        const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id), eq(deals.contactId, input.contactId))).limit(1);
+        if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Choose a deal that belongs to the selected contact." });
+      }
+      let [connection] = await db.select().from(communicationConnections).where(and(eq(communicationConnections.ownerId, ctx.user.id), eq(communicationConnections.provider, "google_calendar"))).limit(1);
+      if (!connection) {
+        const [created] = await db.insert(communicationConnections).values({ ownerId: ctx.user.id, provider: "google_calendar", connectionStatus: "disconnected" }).$returningId();
+        [connection] = await db.select().from(communicationConnections).where(eq(communicationConnections.id, created.id)).limit(1);
+      }
+      const externalEventId = input.externalEventId || `manual-${crypto.randomUUID()}`;
+      const [existing] = await db.select().from(capturedCommunications).where(and(eq(capturedCommunications.connectionId, connection!.id), eq(capturedCommunications.externalEventId, externalEventId))).limit(1);
+      if (existing) return { id: existing.id, duplicate: true };
+      const [activity] = await db.insert(activities).values({ ownerId: ctx.user.id, contactId: input.contactId, dealId: input.dealId ?? null, actorUserId: ctx.user.id, activityType: "calendar_event", body: input.descriptionSnippet ? `${input.title}\n${input.descriptionSnippet}` : input.title, occurredAt: input.startsAt ?? new Date() }).$returningId();
+      const [created] = await db.insert(capturedCommunications).values({ ownerId: ctx.user.id, connectionId: connection!.id, contactId: input.contactId, dealId: input.dealId ?? null, activityId: activity.id, externalEventId, externalCalendarId: input.externalCalendarId || null, title: input.title, descriptionSnippet: input.descriptionSnippet || null, startsAt: input.startsAt ?? null, endsAt: input.endsAt ?? null, providerUpdatedAt: input.providerUpdatedAt ?? null }).$returningId();
+      const rules = await db.select().from(communicationAutomationRules).where(and(eq(communicationAutomationRules.ownerId, ctx.user.id), eq(communicationAutomationRules.connectionId, connection!.id), eq(communicationAutomationRules.isActive, true)));
+      for (const rule of rules) {
+        const template = assertJson(rule.taskTemplateJson, "Automation task template") as { title?: string; dueOffsetDays?: number; priority?: "low" | "medium" | "high" | "urgent" };
+        if (template.title) await db.insert(followUps).values({ ownerId: ctx.user.id, contactId: input.contactId, title: template.title, dueAt: typeof template.dueOffsetDays === "number" ? new Date(Date.now() + template.dueOffsetDays * 86_400_000) : null, priority: template.priority ?? "medium" });
+      }
+      return { id: created.id, duplicate: false, automationsRun: rules.length };
+    }),
+    rules: router({
+      list: protectedProcedure.query(async ({ ctx }) => {
+        const db = await requireDb();
+        return db.select({ rule: communicationAutomationRules, connection: communicationConnections }).from(communicationAutomationRules).innerJoin(communicationConnections, eq(communicationAutomationRules.connectionId, communicationConnections.id)).where(eq(communicationAutomationRules.ownerId, ctx.user.id)).orderBy(desc(communicationAutomationRules.updatedAt));
+      }),
+      create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(160), conditionsJson: z.string().trim().min(2).max(10_000).default("{}"), taskTitle: z.string().trim().min(1).max(255), dueOffsetDays: z.number().int().min(0).max(365).default(1), priority: prioritySchema.default("medium") })).mutation(async ({ ctx, input }) => {
+        assertJson(input.conditionsJson, "Automation conditions");
+        const db = await requireDb();
+        let [connection] = await db.select().from(communicationConnections).where(and(eq(communicationConnections.ownerId, ctx.user.id), eq(communicationConnections.provider, "google_calendar"))).limit(1);
+        if (!connection) {
+          const [created] = await db.insert(communicationConnections).values({ ownerId: ctx.user.id, provider: "google_calendar", connectionStatus: "disconnected" }).$returningId();
+          [connection] = await db.select().from(communicationConnections).where(eq(communicationConnections.id, created.id)).limit(1);
+        }
+        const [created] = await db.insert(communicationAutomationRules).values({ ownerId: ctx.user.id, connectionId: connection!.id, name: input.name, conditionsJson: input.conditionsJson, taskTemplateJson: JSON.stringify({ title: input.taskTitle, dueOffsetDays: input.dueOffsetDays, priority: input.priority }), isActive: false }).$returningId();
+        return { id: created.id, note: "Saved inactive until Google Calendar authorization is confirmed." };
+      }),
+      updateActive: protectedProcedure.input(z.object({ id: z.number().int().positive(), isActive: z.boolean() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [record] = await db.select({ rule: communicationAutomationRules, connection: communicationConnections }).from(communicationAutomationRules).innerJoin(communicationConnections, eq(communicationAutomationRules.connectionId, communicationConnections.id)).where(and(eq(communicationAutomationRules.id, input.id), eq(communicationAutomationRules.ownerId, ctx.user.id))).limit(1);
+        if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Automation rule not found." });
+        if (input.isActive && !canActivateCalendarAutomation(record.connection.connectionStatus)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Authorize Google Calendar before activating this automation." });
+        await db.update(communicationAutomationRules).set({ isActive: input.isActive }).where(eq(communicationAutomationRules.id, record.rule.id));
+        return { success: true };
+      }),
+      remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const result = await db.delete(communicationAutomationRules).where(and(eq(communicationAutomationRules.id, input.id), eq(communicationAutomationRules.ownerId, ctx.user.id)));
+        if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Automation rule not found." });
+        return { success: true };
+      }),
+    }),
+  }),
+
   companies: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await requireDb();
@@ -356,6 +657,31 @@ export const crmRouter = router({
       const timeline = await db.select({ activity: activities, dealTitle: deals.title }).from(activities).leftJoin(deals, eq(activities.dealId, deals.id)).where(and(eq(activities.contactId, contact.id), eq(activities.ownerId, ctx.user.id))).orderBy(desc(activities.occurredAt));
       const linkedDeals = await db.select({ deal: deals, stage: pipelineStages }).from(deals).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).where(and(eq(deals.contactId, contact.id), eq(deals.ownerId, ctx.user.id))).orderBy(desc(deals.updatedAt));
       return { contact, company: company ?? null, values, attachments: attachments.map(item => ({ ...item, url: `/manus-storage/${item.storageKey}` })), timeline, linkedDeals };
+    }),
+    detail360: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const contact = await requireOwnedContact(ctx.user.id, input.id);
+      const db = await requireDb();
+      const [company, values, attachments, linkedDeals, linkedQuotes, linkedTasks, activityRows, importChanges, calendarEvents, listMemberships] = await Promise.all([
+        contact.companyId ? db.select().from(companies).where(and(eq(companies.id, contact.companyId), eq(companies.ownerId, ctx.user.id))).limit(1) : Promise.resolve([]),
+        db.select({ value: contactCustomFieldValues, definition: customFieldDefinitions }).from(contactCustomFieldValues).innerJoin(customFieldDefinitions, eq(contactCustomFieldValues.definitionId, customFieldDefinitions.id)).where(and(eq(contactCustomFieldValues.contactId, contact.id), eq(contactCustomFieldValues.ownerId, ctx.user.id))).orderBy(asc(customFieldDefinitions.position)),
+        db.select().from(contactAttachments).where(and(eq(contactAttachments.contactId, contact.id), eq(contactAttachments.ownerId, ctx.user.id))).orderBy(desc(contactAttachments.createdAt)),
+        db.select({ deal: deals, stage: pipelineStages }).from(deals).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).where(and(eq(deals.contactId, contact.id), eq(deals.ownerId, ctx.user.id))).orderBy(desc(deals.updatedAt)),
+        db.select({ quote: quotes, dealTitle: deals.title }).from(quotes).leftJoin(deals, eq(quotes.dealId, deals.id)).where(and(eq(quotes.contactId, contact.id), eq(quotes.ownerId, ctx.user.id))).orderBy(desc(quotes.updatedAt)),
+        db.select().from(followUps).where(and(eq(followUps.contactId, contact.id), eq(followUps.ownerId, ctx.user.id), isNull(followUps.archivedAt))).orderBy(asc(followUps.dueAt)),
+        db.select({ activity: activities, dealTitle: deals.title }).from(activities).leftJoin(deals, eq(activities.dealId, deals.id)).where(and(eq(activities.contactId, contact.id), eq(activities.ownerId, ctx.user.id), or(isNull(activities.activityType), ne(activities.activityType, "calendar_event"))!)).orderBy(desc(activities.occurredAt)),
+        db.select({ change: contactImportChanges, import: contactImports }).from(contactImportChanges).innerJoin(contactImports, eq(contactImportChanges.importId, contactImports.id)).where(and(eq(contactImportChanges.contactId, contact.id), eq(contactImports.ownerId, ctx.user.id))).orderBy(desc(contactImportChanges.createdAt)),
+        db.select({ event: capturedCommunications, dealTitle: deals.title }).from(capturedCommunications).leftJoin(deals, eq(capturedCommunications.dealId, deals.id)).where(and(eq(capturedCommunications.contactId, contact.id), eq(capturedCommunications.ownerId, ctx.user.id))).orderBy(desc(capturedCommunications.startsAt), desc(capturedCommunications.createdAt)),
+        db.select({ membership: contactListMembers, list: contactLists }).from(contactListMembers).innerJoin(contactLists, eq(contactListMembers.listId, contactLists.id)).where(eq(contactListMembers.contactId, contact.id)).orderBy(asc(contactLists.name)),
+      ]);
+      const summary = buildContact360Summary({ deals: linkedDeals.map(item => item.deal), quotes: linkedQuotes.map(item => item.quote), tasks: linkedTasks });
+      const timeline = [
+        ...buildContact360ActivityTimeline(activityRows, calendarEvents),
+        ...linkedTasks.map(task => ({ id: `task-${task.id}`, kind: "task", occurredAt: task.completedAt ?? task.updatedAt, title: task.completedAt ? "Task completed" : "Task open", description: task.title, dealTitle: null })),
+        ...linkedQuotes.map(({ quote, dealTitle }) => ({ id: `quote-${quote.id}`, kind: "quote", occurredAt: quote.updatedAt, title: `Quote ${quote.status}`, description: `${quote.title} · $${Number(quote.totalAmount).toFixed(2)}`, dealTitle: dealTitle ?? null })),
+        ...importChanges.map(({ change, import: imported }) => ({ id: `import-${change.id}`, kind: "import", occurredAt: change.createdAt, title: `Import ${change.action}`, description: imported.filename, dealTitle: null })),
+        ...attachments.map(attachment => ({ id: `attachment-${attachment.id}`, kind: "attachment", occurredAt: attachment.createdAt, title: "Attachment added", description: attachment.filename, dealTitle: null })),
+      ].sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime());
+      return { contact, company: company[0] ?? null, values, attachments: attachments.map(item => ({ ...item, url: `/manus-storage/${item.storageKey}` })), deals: linkedDeals, quotes: linkedQuotes, tasks: linkedTasks, listMemberships, calendarEvents, summary, timeline };
     }),
     duplicateCandidates: protectedProcedure.query(async ({ ctx }) => {
       const db = await requireDb();
@@ -811,6 +1137,78 @@ export const crmRouter = router({
     }),
   }),
 
+  catalog: router({
+    products: router({
+      list: protectedProcedure.input(z.object({ includeInactive: z.boolean().default(false) }).default({ includeInactive: false })).query(async ({ ctx, input }) => {
+        const db = await requireDb();
+        return db.select().from(products).where(and(eq(products.ownerId, ctx.user.id), ...(input.includeInactive ? [] : [eq(products.isActive, true)]))).orderBy(asc(products.name));
+      }),
+      create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(255), sku: z.string().trim().max(120).nullable().optional(), description: z.string().trim().max(5000).nullable().optional(), billingType: z.enum(["one_time", "recurring"]).default("one_time"), defaultUnitAmount: z.number().min(0).max(1_000_000_000) })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [created] = await db.insert(products).values({ ownerId: ctx.user.id, name: input.name, sku: input.sku || null, description: input.description || null, billingType: input.billingType, defaultUnitAmount: input.defaultUnitAmount.toFixed(2) }).$returningId();
+        return { id: created.id };
+      }),
+      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), name: z.string().trim().min(1).max(255), sku: z.string().trim().max(120).nullable().optional(), description: z.string().trim().max(5000).nullable().optional(), billingType: z.enum(["one_time", "recurring"]), defaultUnitAmount: z.number().min(0).max(1_000_000_000), isActive: z.boolean() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const result = await db.update(products).set({ name: input.name, sku: input.sku || null, description: input.description || null, billingType: input.billingType, defaultUnitAmount: input.defaultUnitAmount.toFixed(2), isActive: input.isActive }).where(and(eq(products.id, input.id), eq(products.ownerId, ctx.user.id)));
+        if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." });
+        return { success: true };
+      }),
+    }),
+    priceBook: router({
+      list: protectedProcedure.input(z.object({ productId: z.number().int().positive().optional() }).default({})).query(async ({ ctx, input }) => {
+        const db = await requireDb();
+        return db.select({ entry: priceBookEntries, product: products }).from(priceBookEntries).innerJoin(products, eq(priceBookEntries.productId, products.id)).where(and(eq(priceBookEntries.ownerId, ctx.user.id), ...(input.productId ? [eq(priceBookEntries.productId, input.productId)] : []))).orderBy(desc(priceBookEntries.createdAt));
+      }),
+      create: protectedProcedure.input(z.object({ productId: z.number().int().positive(), currency: z.string().trim().length(3).transform(value => value.toUpperCase()), unitAmount: z.number().min(0).max(1_000_000_000), effectiveFrom: z.date().nullable().optional(), effectiveTo: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [product] = await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.ownerId, ctx.user.id))).limit(1);
+        if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." });
+        if (input.effectiveFrom && input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw new TRPCError({ code: "BAD_REQUEST", message: "The price end date must follow its start date." });
+        const [created] = await db.insert(priceBookEntries).values({ ownerId: ctx.user.id, productId: product.id, currency: input.currency, unitAmount: input.unitAmount.toFixed(2), effectiveFrom: input.effectiveFrom ?? null, effectiveTo: input.effectiveTo ?? null }).$returningId();
+        return { id: created.id };
+      }),
+      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), unitAmount: z.number().min(0).max(1_000_000_000), effectiveFrom: z.date().nullable().optional(), effectiveTo: z.date().nullable().optional(), isActive: z.boolean() })).mutation(async ({ ctx, input }) => {
+        if (input.effectiveFrom && input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw new TRPCError({ code: "BAD_REQUEST", message: "The price end date must follow its start date." });
+        const db = await requireDb();
+        const result = await db.update(priceBookEntries).set({ unitAmount: input.unitAmount.toFixed(2), effectiveFrom: input.effectiveFrom ?? null, effectiveTo: input.effectiveTo ?? null, isActive: input.isActive }).where(and(eq(priceBookEntries.id, input.id), eq(priceBookEntries.ownerId, ctx.user.id)));
+        if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Price book entry not found." });
+        return { success: true };
+      }),
+    }),
+    dealItems: router({
+      list: protectedProcedure.input(z.object({ dealId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id))).limit(1);
+        if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+        return db.select().from(dealLineItems).where(and(eq(dealLineItems.dealId, deal.id), eq(dealLineItems.ownerId, ctx.user.id))).orderBy(asc(dealLineItems.createdAt));
+      }),
+      add: protectedProcedure.input(z.object({ dealId: z.number().int().positive(), productId: z.number().int().positive().nullable().optional(), priceBookEntryId: z.number().int().positive().nullable().optional(), productName: z.string().trim().min(1).max(255).optional(), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000).optional(), discountPercent: z.number().min(0).max(100).default(0), taxPercent: z.number().min(0).max(100).default(0) })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id))).limit(1);
+        if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+        let product: typeof products.$inferSelect | undefined;
+        if (input.productId) {
+          [product] = await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.ownerId, ctx.user.id))).limit(1);
+          if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." });
+        }
+        let price: typeof priceBookEntries.$inferSelect | undefined;
+        if (input.priceBookEntryId) {
+          [price] = await db.select().from(priceBookEntries).where(and(eq(priceBookEntries.id, input.priceBookEntryId), eq(priceBookEntries.ownerId, ctx.user.id))).limit(1);
+          if (!price || (product && price.productId !== product.id)) throw new TRPCError({ code: "BAD_REQUEST", message: "Price entry does not match the selected product." });
+        }
+        const unitAmount = input.unitAmount ?? Number(price?.unitAmount ?? product?.defaultUnitAmount ?? 0);
+        const productName = input.productName ?? product?.name;
+        if (!productName) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a product or provide a line-item name." });
+        const line = calculateCommercialLine({ quantity: input.quantity, unitAmount, discountPercent: input.discountPercent, taxPercent: input.taxPercent });
+        const [created] = await db.insert(dealLineItems).values({ ownerId: ctx.user.id, dealId: deal.id, productId: product?.id ?? null, priceBookEntryId: price?.id ?? null, productName, productSku: product?.sku ?? null, billingType: product?.billingType ?? "one_time", quantity: input.quantity.toFixed(2), unitAmount: unitAmount.toFixed(2), discountPercent: input.discountPercent.toFixed(2), taxPercent: input.taxPercent.toFixed(2), lineSubtotal: line.subtotal.toFixed(2), discountAmount: line.discountAmount.toFixed(2), taxAmount: line.taxAmount.toFixed(2), lineTotal: line.total.toFixed(2) }).$returningId();
+        const items = await db.select().from(dealLineItems).where(and(eq(dealLineItems.dealId, deal.id), eq(dealLineItems.ownerId, ctx.user.id)));
+        await db.update(deals).set({ amount: items.reduce((total, item) => total + Number(item.lineTotal), 0).toFixed(2) }).where(eq(deals.id, deal.id));
+        return { id: created.id };
+      }),
+    }),
+  }),
+
   quotes: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await requireDb();
@@ -827,14 +1225,14 @@ export const crmRouter = router({
         .where(and(eq(quotes.id, input.id), eq(quotes.ownerId, ctx.user.id))).limit(1);
       if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Quote not found." });
       const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, record.quote.id)).orderBy(asc(quoteItems.createdAt));
-      return { ...record, items, calculatedTotal: calculateQuoteTotal(items) };
+      return { ...record, items, calculatedTotal: calculateCommercialSummary(items).total };
     }),
     create: protectedProcedure.input(z.object({
       title: z.string().trim().min(1).max(255),
       contactId: z.number().int().positive().nullable().optional(),
       companyId: z.number().int().positive().nullable().optional(),
       dealId: z.number().int().positive().nullable().optional(),
-      items: z.array(z.object({ description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000) })).default([]),
+      items: z.array(z.object({ description: z.string().trim().min(1).max(512).optional(), productId: z.number().int().positive().nullable().optional(), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000).optional(), discountPercent: z.number().min(0).max(100).default(0), taxPercent: z.number().min(0).max(100).default(0) })).default([]),
     })).mutation(async ({ ctx, input }) => {
       if (input.contactId) await requireOwnedContact(ctx.user.id, input.contactId);
       const db = await requireDb();
@@ -846,9 +1244,18 @@ export const crmRouter = router({
         const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id))).limit(1);
         if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
       }
-      const totalAmount = calculateQuoteTotal(input.items).toFixed(2);
-      const [created] = await db.insert(quotes).values({ ownerId: ctx.user.id, title: input.title, contactId: input.contactId ?? null, companyId: input.companyId ?? null, dealId: input.dealId ?? null, totalAmount }).$returningId();
-      if (input.items.length) await db.insert(quoteItems).values(input.items.map(item => ({ quoteId: created.id, description: item.description, quantity: item.quantity.toFixed(2), unitAmount: item.unitAmount.toFixed(2) })));
+      const preparedItems = [] as Array<{ productId: number | null; productName: string | null; productSku: string | null; billingType: "one_time" | "recurring"; description: string; quantity: string; unitAmount: string; discountPercent: string; taxPercent: string; lineSubtotal: string; discountAmount: string; taxAmount: string; lineTotal: string }>;
+      for (const item of input.items) {
+        let product: typeof products.$inferSelect | undefined;
+        if (item.productId) { [product] = await db.select().from(products).where(and(eq(products.id, item.productId), eq(products.ownerId, ctx.user.id))).limit(1); if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." }); }
+        const description = item.description ?? product?.name;
+        if (!description) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide a description or select a product." });
+        const unitAmount = item.unitAmount ?? Number(product?.defaultUnitAmount ?? 0); const line = calculateCommercialLine({ quantity: item.quantity, unitAmount, discountPercent: item.discountPercent, taxPercent: item.taxPercent });
+        preparedItems.push({ productId: product?.id ?? null, productName: product?.name ?? null, productSku: product?.sku ?? null, billingType: product?.billingType ?? "one_time", description, quantity: item.quantity.toFixed(2), unitAmount: unitAmount.toFixed(2), discountPercent: item.discountPercent.toFixed(2), taxPercent: item.taxPercent.toFixed(2), lineSubtotal: line.subtotal.toFixed(2), discountAmount: line.discountAmount.toFixed(2), taxAmount: line.taxAmount.toFixed(2), lineTotal: line.total.toFixed(2) });
+      }
+      const summary = calculateCommercialSummary(input.items.map((item, index) => ({ quantity: item.quantity, unitAmount: preparedItems[index] ? Number(preparedItems[index].unitAmount) : 0, discountPercent: item.discountPercent, taxPercent: item.taxPercent })));
+      const [created] = await db.insert(quotes).values({ ownerId: ctx.user.id, title: input.title, contactId: input.contactId ?? null, companyId: input.companyId ?? null, dealId: input.dealId ?? null, subtotalAmount: summary.subtotal.toFixed(2), discountAmount: summary.discountAmount.toFixed(2), taxAmount: summary.taxAmount.toFixed(2), totalAmount: summary.total.toFixed(2) }).$returningId();
+      if (preparedItems.length) await db.insert(quoteItems).values(preparedItems.map(item => ({ quoteId: created.id, ...item })));
       return { id: created.id };
     }),
     update: protectedProcedure.input(z.object({
@@ -886,22 +1293,31 @@ export const crmRouter = router({
       return { success: true };
     }),
     items: router({
-      add: protectedProcedure.input(z.object({ quoteId: z.number().int().positive(), description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000) })).mutation(async ({ ctx, input }) => {
+      add: protectedProcedure.input(z.object({ quoteId: z.number().int().positive(), description: z.string().trim().min(1).max(512).optional(), productId: z.number().int().positive().nullable().optional(), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000).optional(), discountPercent: z.number().min(0).max(100).default(0), taxPercent: z.number().min(0).max(100).default(0) })).mutation(async ({ ctx, input }) => {
         const db = await requireDb();
         const [quote] = await db.select().from(quotes).where(and(eq(quotes.id, input.quoteId), eq(quotes.ownerId, ctx.user.id))).limit(1);
         if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Quote not found." });
-        const [created] = await db.insert(quoteItems).values({ quoteId: quote.id, description: input.description, quantity: input.quantity.toFixed(2), unitAmount: input.unitAmount.toFixed(2) }).$returningId();
+        let product: typeof products.$inferSelect | undefined;
+        if (input.productId) { [product] = await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.ownerId, ctx.user.id))).limit(1); if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." }); }
+        const description = input.description ?? product?.name;
+        if (!description) throw new TRPCError({ code: "BAD_REQUEST", message: "Provide a description or select a product." });
+        const unitAmount = input.unitAmount ?? Number(product?.defaultUnitAmount ?? 0);
+        const line = calculateCommercialLine({ quantity: input.quantity, unitAmount, discountPercent: input.discountPercent, taxPercent: input.taxPercent });
+        const [created] = await db.insert(quoteItems).values({ quoteId: quote.id, productId: product?.id ?? null, productName: product?.name ?? null, productSku: product?.sku ?? null, billingType: product?.billingType ?? "one_time", description, quantity: input.quantity.toFixed(2), unitAmount: unitAmount.toFixed(2), discountPercent: input.discountPercent.toFixed(2), taxPercent: input.taxPercent.toFixed(2), lineSubtotal: line.subtotal.toFixed(2), discountAmount: line.discountAmount.toFixed(2), taxAmount: line.taxAmount.toFixed(2), lineTotal: line.total.toFixed(2) }).$returningId();
         const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, quote.id));
-        await db.update(quotes).set({ totalAmount: calculateQuoteTotal(items).toFixed(2) }).where(eq(quotes.id, quote.id));
+        const summary = calculateCommercialSummary(items);
+        await db.update(quotes).set({ subtotalAmount: summary.subtotal.toFixed(2), discountAmount: summary.discountAmount.toFixed(2), taxAmount: summary.taxAmount.toFixed(2), totalAmount: summary.total.toFixed(2) }).where(eq(quotes.id, quote.id));
         return { id: created.id };
       }),
-      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000) })).mutation(async ({ ctx, input }) => {
+      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000), discountPercent: z.number().min(0).max(100).optional(), taxPercent: z.number().min(0).max(100).optional() })).mutation(async ({ ctx, input }) => {
         const db = await requireDb();
         const [item] = await db.select({ item: quoteItems, quote: quotes }).from(quoteItems).innerJoin(quotes, eq(quoteItems.quoteId, quotes.id)).where(and(eq(quoteItems.id, input.id), eq(quotes.ownerId, ctx.user.id))).limit(1);
         if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Quote item not found." });
-        await db.update(quoteItems).set({ description: input.description, quantity: input.quantity.toFixed(2), unitAmount: input.unitAmount.toFixed(2) }).where(eq(quoteItems.id, item.item.id));
+        const discountPercent = input.discountPercent ?? Number(item.item.discountPercent); const taxPercent = input.taxPercent ?? Number(item.item.taxPercent); const line = calculateCommercialLine({ quantity: input.quantity, unitAmount: input.unitAmount, discountPercent, taxPercent });
+        await db.update(quoteItems).set({ description: input.description, quantity: input.quantity.toFixed(2), unitAmount: input.unitAmount.toFixed(2), discountPercent: discountPercent.toFixed(2), taxPercent: taxPercent.toFixed(2), lineSubtotal: line.subtotal.toFixed(2), discountAmount: line.discountAmount.toFixed(2), taxAmount: line.taxAmount.toFixed(2), lineTotal: line.total.toFixed(2) }).where(eq(quoteItems.id, item.item.id));
         const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, item.quote.id));
-        await db.update(quotes).set({ totalAmount: calculateQuoteTotal(items).toFixed(2) }).where(eq(quotes.id, item.quote.id));
+        const summary = calculateCommercialSummary(items);
+        await db.update(quotes).set({ subtotalAmount: summary.subtotal.toFixed(2), discountAmount: summary.discountAmount.toFixed(2), taxAmount: summary.taxAmount.toFixed(2), totalAmount: summary.total.toFixed(2) }).where(eq(quotes.id, item.quote.id));
         return { success: true };
       }),
       remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
@@ -910,7 +1326,8 @@ export const crmRouter = router({
         if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Quote item not found." });
         await db.delete(quoteItems).where(eq(quoteItems.id, item.item.id));
         const remaining = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, item.quote.id));
-        await db.update(quotes).set({ totalAmount: calculateQuoteTotal(remaining).toFixed(2) }).where(eq(quotes.id, item.quote.id));
+        const summary = calculateCommercialSummary(remaining);
+        await db.update(quotes).set({ subtotalAmount: summary.subtotal.toFixed(2), discountAmount: summary.discountAmount.toFixed(2), taxAmount: summary.taxAmount.toFixed(2), totalAmount: summary.total.toFixed(2) }).where(eq(quotes.id, item.quote.id));
         return { success: true };
       }),
     }),

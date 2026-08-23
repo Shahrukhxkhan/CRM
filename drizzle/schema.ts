@@ -22,9 +22,29 @@ export const users = mysqlTable("users", {
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+ updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+ lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
+
+export const workspaceMembers = mysqlTable(
+  "workspaceMembers",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    workspaceRole: mysqlEnum("workspaceRole", ["manager", "contributor"]).default("contributor").notNull(),
+    isActive: boolean("isActive").default(true).notNull(),
+    invitedAt: timestamp("invitedAt").defaultNow().notNull(),
+    acceptedAt: timestamp("acceptedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("workspace_member_owner_user_unique").on(table.ownerId, table.userId),
+    index("workspace_member_owner_active_idx").on(table.ownerId, table.isActive),
+    index("workspace_member_user_active_idx").on(table.userId, table.isActive),
+  ]
+);
 
 export const companies = mysqlTable(
   "companies",
@@ -155,6 +175,24 @@ export const savedContactSearches = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => [index("saved_contact_search_owner_pinned_idx").on(table.ownerId, table.isPinned)]
+);
+
+export const savedTableViews = mysqlTable(
+  "savedTableViews",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    entityType: mysqlEnum("entityType", ["contacts", "tasks", "deals"]).notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    configJson: text("configJson").notNull(),
+    isPinned: boolean("isPinned").default(false).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("saved_table_view_owner_entity_name_unique").on(table.ownerId, table.entityType, table.name),
+    index("saved_table_view_owner_entity_pinned_idx").on(table.ownerId, table.entityType, table.isPinned),
+  ]
 );
 
 export const contactAttachments = mysqlTable(
@@ -344,6 +382,7 @@ export const followUps = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
     contactId: int("contactId").references(() => contacts.id, { onDelete: "set null" }),
+    assigneeUserId: int("assigneeUserId").references(() => users.id, { onDelete: "set null" }),
     title: varchar("title", { length: 255 }).notNull(),
     description: text("description"),
     dueAt: timestamp("dueAt"),
@@ -365,6 +404,7 @@ export const followUps = mysqlTable(
   table => [
     index("follow_up_owner_due_idx").on(table.ownerId, table.dueAt),
     index("follow_up_owner_completion_idx").on(table.ownerId, table.completedAt),
+    index("follow_up_owner_assignee_idx").on(table.ownerId, table.assigneeUserId),
     index("follow_up_reminder_task_uid_idx").on(table.reminderCronTaskUid),
     index("follow_up_escalation_task_uid_idx").on(table.escalationCronTaskUid),
   ]
@@ -376,6 +416,7 @@ export const taskComments = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
     followUpId: int("followUpId").notNull().references(() => followUps.id, { onDelete: "cascade" }),
+    authorUserId: int("authorUserId").references(() => users.id, { onDelete: "set null" }),
     body: text("body").notNull(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -445,6 +486,7 @@ export const deals = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
     contactId: int("contactId").notNull().references(() => contacts.id, { onDelete: "restrict" }),
+    assigneeUserId: int("assigneeUserId").references(() => users.id, { onDelete: "set null" }),
     companyId: int("companyId").references(() => companies.id, { onDelete: "set null" }),
     pipelineId: int("pipelineId").notNull().references(() => pipelines.id, { onDelete: "restrict" }),
     stageId: int("stageId").notNull().references(() => pipelineStages.id, { onDelete: "restrict" }),
@@ -460,8 +502,68 @@ export const deals = mysqlTable(
   table => [
     index("deal_owner_pipeline_stage_idx").on(table.ownerId, table.pipelineId, table.stageId),
     index("deal_owner_contact_idx").on(table.ownerId, table.contactId),
+    index("deal_owner_assignee_idx").on(table.ownerId, table.assigneeUserId),
     index("deal_lost_reason_idx").on(table.lostReasonId),
   ]
+);
+
+export const products = mysqlTable(
+  "products",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    sku: varchar("sku", { length: 120 }),
+    description: text("description"),
+    billingType: mysqlEnum("billingType", ["one_time", "recurring"]).default("one_time").notNull(),
+    defaultUnitAmount: decimal("defaultUnitAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    isActive: boolean("isActive").default(true).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [uniqueIndex("product_owner_name_unique").on(table.ownerId, table.name), uniqueIndex("product_owner_sku_unique").on(table.ownerId, table.sku), index("product_owner_active_idx").on(table.ownerId, table.isActive)]
+);
+
+export const priceBookEntries = mysqlTable(
+  "priceBookEntries",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
+    currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+    unitAmount: decimal("unitAmount", { precision: 14, scale: 2 }).notNull(),
+    effectiveFrom: timestamp("effectiveFrom"),
+    effectiveTo: timestamp("effectiveTo"),
+    isActive: boolean("isActive").default(true).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [index("price_book_owner_product_active_idx").on(table.ownerId, table.productId, table.isActive), index("price_book_owner_currency_idx").on(table.ownerId, table.currency)]
+);
+
+export const dealLineItems = mysqlTable(
+  "dealLineItems",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    dealId: int("dealId").notNull().references(() => deals.id, { onDelete: "cascade" }),
+    productId: int("productId").references(() => products.id, { onDelete: "set null" }),
+    priceBookEntryId: int("priceBookEntryId").references(() => priceBookEntries.id, { onDelete: "set null" }),
+    productName: varchar("productName", { length: 255 }).notNull(),
+    productSku: varchar("productSku", { length: 120 }),
+    billingType: mysqlEnum("billingType", ["one_time", "recurring"]).default("one_time").notNull(),
+    quantity: decimal("quantity", { precision: 12, scale: 2 }).default("1").notNull(),
+    unitAmount: decimal("unitAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    discountPercent: decimal("discountPercent", { precision: 5, scale: 2 }).default("0").notNull(),
+    taxPercent: decimal("taxPercent", { precision: 5, scale: 2 }).default("0").notNull(),
+    lineSubtotal: decimal("lineSubtotal", { precision: 14, scale: 2 }).default("0").notNull(),
+    discountAmount: decimal("discountAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    taxAmount: decimal("taxAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    lineTotal: decimal("lineTotal", { precision: 14, scale: 2 }).default("0").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [index("deal_line_item_owner_deal_idx").on(table.ownerId, table.dealId), index("deal_line_item_product_idx").on(table.productId)]
 );
 
 export const activities = mysqlTable(
@@ -471,6 +573,7 @@ export const activities = mysqlTable(
     ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
     contactId: int("contactId").notNull().references(() => contacts.id, { onDelete: "cascade" }),
     dealId: int("dealId").references(() => deals.id, { onDelete: "set null" }),
+    actorUserId: int("actorUserId").references(() => users.id, { onDelete: "set null" }),
     activityType: varchar("activityType", { length: 64 }).default("note").notNull(),
     body: text("body").notNull(),
     occurredAt: timestamp("occurredAt").defaultNow().notNull(),
@@ -480,6 +583,72 @@ export const activities = mysqlTable(
   table => [
     index("activity_owner_contact_occurred_idx").on(table.ownerId, table.contactId, table.occurredAt),
     index("activity_owner_deal_occurred_idx").on(table.ownerId, table.dealId, table.occurredAt),
+    index("activity_owner_actor_idx").on(table.ownerId, table.actorUserId),
+  ]
+);
+
+export const communicationConnections = mysqlTable(
+  "communicationConnections",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    provider: mysqlEnum("provider", ["google_calendar"]).default("google_calendar").notNull(),
+    externalAccountEmail: varchar("externalAccountEmail", { length: 320 }),
+    connectionStatus: mysqlEnum("connectionStatus", ["disconnected", "connected", "error"]).default("disconnected").notNull(),
+    lastSyncedAt: timestamp("lastSyncedAt"),
+    lastSyncError: text("lastSyncError"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [uniqueIndex("communication_connection_owner_provider_unique").on(table.ownerId, table.provider)]
+);
+
+export const capturedCommunications = mysqlTable(
+  "capturedCommunications",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    connectionId: int("connectionId").notNull(),
+    contactId: int("contactId").references(() => contacts.id, { onDelete: "set null" }),
+    dealId: int("dealId").references(() => deals.id, { onDelete: "set null" }),
+    activityId: int("activityId").references(() => activities.id, { onDelete: "set null" }),
+    externalEventId: varchar("externalEventId", { length: 512 }).notNull(),
+    externalCalendarId: varchar("externalCalendarId", { length: 512 }),
+    title: varchar("title", { length: 512 }).notNull(),
+    descriptionSnippet: varchar("descriptionSnippet", { length: 1000 }),
+    startsAt: timestamp("startsAt"),
+    endsAt: timestamp("endsAt"),
+    providerUpdatedAt: timestamp("providerUpdatedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    foreignKey({ columns: [table.connectionId], foreignColumns: [communicationConnections.id], name: "captured_comm_connection_fk" }).onDelete("cascade"),
+    uniqueIndex("captured_communication_connection_event_unique").on(table.connectionId, table.externalEventId),
+    index("captured_communication_owner_contact_start_idx").on(table.ownerId, table.contactId, table.startsAt),
+    index("captured_communication_owner_deal_start_idx").on(table.ownerId, table.dealId, table.startsAt),
+  ]
+);
+
+export const communicationAutomationRules = mysqlTable(
+  "communicationAutomationRules",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerId: int("ownerId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    connectionId: int("connectionId").notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    triggerType: mysqlEnum("triggerType", ["calendar_event_captured"]).default("calendar_event_captured").notNull(),
+    conditionsJson: text("conditionsJson").notNull(),
+    actionType: mysqlEnum("actionType", ["create_follow_up"]).default("create_follow_up").notNull(),
+    taskTemplateJson: text("taskTemplateJson").notNull(),
+    isActive: boolean("isActive").default(false).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    foreignKey({ columns: [table.connectionId], foreignColumns: [communicationConnections.id], name: "communication_rule_connection_fk" }).onDelete("cascade"),
+    uniqueIndex("communication_rule_connection_name_unique").on(table.connectionId, table.name),
+    index("communication_rule_owner_connection_active_idx").on(table.ownerId, table.connectionId, table.isActive),
   ]
 );
 
@@ -506,6 +675,9 @@ export const quotes = mysqlTable(
     dealId: int("dealId").references(() => deals.id, { onDelete: "set null" }),
     title: varchar("title", { length: 255 }).notNull(),
     status: varchar("status", { length: 64 }).default("draft").notNull(),
+    subtotalAmount: decimal("subtotalAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    discountAmount: decimal("discountAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    taxAmount: decimal("taxAmount", { precision: 14, scale: 2 }).default("0").notNull(),
     totalAmount: decimal("totalAmount", { precision: 14, scale: 2 }).default("0").notNull(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -518,13 +690,24 @@ export const quoteItems = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     quoteId: int("quoteId").notNull().references(() => quotes.id, { onDelete: "cascade" }),
+    productId: int("productId").references(() => products.id, { onDelete: "set null" }),
+    priceBookEntryId: int("priceBookEntryId").references(() => priceBookEntries.id, { onDelete: "set null" }),
+    productName: varchar("productName", { length: 255 }),
+    productSku: varchar("productSku", { length: 120 }),
+    billingType: mysqlEnum("billingType", ["one_time", "recurring"]).default("one_time").notNull(),
     description: varchar("description", { length: 512 }).notNull(),
     quantity: decimal("quantity", { precision: 12, scale: 2 }).default("1").notNull(),
     unitAmount: decimal("unitAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    discountPercent: decimal("discountPercent", { precision: 5, scale: 2 }).default("0").notNull(),
+    taxPercent: decimal("taxPercent", { precision: 5, scale: 2 }).default("0").notNull(),
+    lineSubtotal: decimal("lineSubtotal", { precision: 14, scale: 2 }).default("0").notNull(),
+    discountAmount: decimal("discountAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    taxAmount: decimal("taxAmount", { precision: 14, scale: 2 }).default("0").notNull(),
+    lineTotal: decimal("lineTotal", { precision: 14, scale: 2 }).default("0").notNull(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
-  table => [index("quote_item_quote_idx").on(table.quoteId)]
+  table => [index("quote_item_quote_idx").on(table.quoteId), index("quote_item_product_idx").on(table.productId)]
 );
 
 export type User = typeof users.$inferSelect;
