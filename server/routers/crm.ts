@@ -54,10 +54,10 @@ const fieldTypeSchema = z.enum(["text", "number", "date", "select", "multiselect
 const savedViewEntitySchema = z.enum(["contacts", "tasks", "deals"]);
 const savedViewConfigSchema = z.object({
   filters: z.record(z.string(), z.union([z.string().max(160), z.boolean(), z.array(z.string().max(120)).max(20)])).default({}),
-  sort: z.object({ field: z.string().trim().min(1).max(48), direction: z.enum(["asc", "desc"]) }).default({ field: "updatedAt", direction: "desc" }),
+  sort: z.object({ field: z.string().trim().min(1).max(48), direction: z.enum(["asc", "desc"]) }).strict().default({ field: "updatedAt", direction: "desc" }),
   columns: z.array(z.string().trim().min(1).max(48)).max(12).default([]),
   groupBy: z.string().trim().max(48).nullable().optional(),
-});
+}).strict();
 
 export function parseSavedViewConfig(configJson: string) {
   return savedViewConfigSchema.parse(JSON.parse(configJson));
@@ -204,6 +204,11 @@ export function canAssignWorkspaceUser(ownerId: number, userId: number, membersh
 
 export function canCoordinateWorkspace(ownerId: number, userId: number, membership?: { isActive: boolean; workspaceRole: "manager" | "contributor" } | null) {
   return userId === ownerId || Boolean(membership?.isActive && membership.workspaceRole === "manager");
+}
+
+export function canReadWorkspaceRecord(ownerId: number, userId: number, assigneeUserId: number | null, membership?: { isActive: boolean; workspaceRole: "manager" | "contributor" } | null) {
+  if (userId === ownerId) return true;
+  return Boolean(membership?.isActive && assigneeUserId === userId);
 }
 
 export function canActivateCalendarAutomation(connectionStatus: "disconnected" | "connected" | "error") {
@@ -544,7 +549,7 @@ export const crmRouter = router({
       const [task] = await db.select().from(followUps).where(and(eq(followUps.id, input.taskId), eq(followUps.assigneeUserId, ctx.user.id), isNull(followUps.archivedAt))).limit(1);
       if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Assigned task not found." });
       const [membership] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.ownerId, task.ownerId), eq(workspaceMembers.userId, ctx.user.id), eq(workspaceMembers.isActive, true))).limit(1);
-      if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "You no longer have access to this workspace." });
+      if (!canReadWorkspaceRecord(task.ownerId, ctx.user.id, task.assigneeUserId, membership)) throw new TRPCError({ code: "FORBIDDEN", message: "You no longer have access to this assigned task." });
       const [created] = await db.insert(taskComments).values({ ownerId: task.ownerId, followUpId: task.id, authorUserId: ctx.user.id, body: input.body }).$returningId();
       return { id: created.id };
     }),

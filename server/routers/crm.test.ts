@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildAgingBuckets, buildContact360ActivityTimeline, buildContact360Summary, buildSourceQualityRows, calculateCommercialLine, calculateCommercialSummary, calculateQuoteTotal, canActivateCalendarAutomation, canAssignWorkspaceUser, canCoordinateWorkspace, classifyImportRows, isContact360StandardActivityType, isValidReportRange, mapRawImportRows, nextDueDate, normalizeEmail, parseSavedViewConfig, quoteStatusSchema, resolveLeadSource, serializeCustomFieldValue, sortGlobalSearchResults } from "./crm";
+import { buildAgingBuckets, buildContact360ActivityTimeline, buildContact360Summary, buildSourceQualityRows, calculateCommercialLine, calculateCommercialSummary, calculateQuoteTotal, canActivateCalendarAutomation, canAssignWorkspaceUser, canCoordinateWorkspace, canReadWorkspaceRecord, classifyImportRows, isContact360StandardActivityType, isValidReportRange, mapRawImportRows, nextDueDate, normalizeEmail, parseSavedViewConfig, quoteStatusSchema, resolveLeadSource, serializeCustomFieldValue, sortGlobalSearchResults } from "./crm";
 import { isCronOnlyCaller, makeRunKey, shouldRetryRunStatus } from "../scheduledWork";
+import { getSavedViewPresentationMode } from "@shared/savedViewPresentation";
 
 describe("CRM duplicate detection", () => {
   it("uses a trimmed, lowercased email as the owner-scoped matching key", () => {
@@ -31,6 +32,18 @@ describe("workspace assignment authorization", () => {
     expect(canCoordinateWorkspace(10, 22, { isActive: true, workspaceRole: "manager" })).toBe(true);
     expect(canCoordinateWorkspace(10, 22, { isActive: true, workspaceRole: "contributor" })).toBe(false);
     expect(canCoordinateWorkspace(10, 22, { isActive: false, workspaceRole: "manager" })).toBe(false);
+  });
+
+  it("limits member record access to work assigned directly to an active member", () => {
+    const contributor = { isActive: true, workspaceRole: "contributor" as const };
+    const manager = { isActive: true, workspaceRole: "manager" as const };
+
+    expect(canReadWorkspaceRecord(10, 10, null)).toBe(true);
+    expect(canReadWorkspaceRecord(10, 22, 22, contributor)).toBe(true);
+    expect(canReadWorkspaceRecord(10, 22, 25, contributor)).toBe(false);
+    expect(canReadWorkspaceRecord(10, 22, 25, manager)).toBe(false);
+    expect(canReadWorkspaceRecord(10, 22, 22, { ...contributor, isActive: false })).toBe(false);
+    expect(canReadWorkspaceRecord(10, 22, 22)).toBe(false);
   });
 });
 
@@ -181,9 +194,22 @@ describe("Contact 360° summary", () => {
 });
 
 describe("Saved Views", () => {
+  it("keeps Contacts column-only while Tasks and Deals retain grouping controls", () => {
+    expect(getSavedViewPresentationMode("contacts")).toEqual({ supportsGrouping: false, summary: "Columns" });
+    expect(getSavedViewPresentationMode("tasks")).toEqual({ supportsGrouping: true, summary: "Columns & grouping" });
+    expect(getSavedViewPresentationMode("deals")).toEqual({ supportsGrouping: true, summary: "Columns & grouping" });
+  });
+
   it("accepts only structured filters, sorting, columns, and grouping preferences", () => {
-    expect(parseSavedViewConfig(JSON.stringify({ filters: { priority: "urgent" }, sort: { field: "dueAt", direction: "asc" }, columns: ["title", "priority"], groupBy: "priority" }))).toMatchObject({ filters: { priority: "urgent" }, sort: { field: "dueAt", direction: "asc" }, groupBy: "priority" });
+    expect(parseSavedViewConfig(JSON.stringify({ filters: { priority: "urgent" }, sort: { field: "dueAt", direction: "asc" }, columns: ["title", "priority"], groupBy: "priority" }))).toMatchObject({ filters: { priority: "urgent" }, sort: { field: "dueAt", direction: "asc" }, columns: ["title", "priority"], groupBy: "priority" });
     expect(() => parseSavedViewConfig(JSON.stringify({ filters: { nested: { unsupported: true } }, sort: { field: "dueAt", direction: "up" }, columns: [] }))).toThrow();
+  });
+
+  it("restores the complete persisted configuration without allowing executable query text", () => {
+    const config = parseSavedViewConfig(JSON.stringify({ filters: { stageKind: "open" }, sort: { field: "amount", direction: "desc" }, columns: ["title", "amount", "stage"], groupBy: "pipeline" }));
+    expect(config).toEqual({ filters: { stageKind: "open" }, sort: { field: "amount", direction: "desc" }, columns: ["title", "amount", "stage"], groupBy: "pipeline" });
+    expect(() => parseSavedViewConfig(JSON.stringify({ sql: "DROP TABLE savedTableViews", filters: {}, sort: { field: "name", direction: "asc" }, columns: [] }))).toThrow();
+    expect(() => parseSavedViewConfig(JSON.stringify({ filters: {}, sort: { field: "name", direction: "asc", ownerId: 99 }, columns: [] }))).toThrow();
   });
 
   it("orders mixed owner-scoped search results by recency and honors the requested limit", () => {

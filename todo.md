@@ -86,14 +86,21 @@
 - [ ] Visually exercise Contact 360° against a real existing contact with linked CRM records when available.
 - [x] Define and obtain approval for owner-scoped saved table views and the global-search result contract.
 - [x] Build Global Search across contacts, companies, deals, tasks, quotes, and activities inside the existing workspace navigation.
-- [ ] Build saved table views for Contacts, Tasks, and Deals with owner-scoped filters, sort, columns, and grouping preferences.
+- [x] Build saved table views for Contacts, Tasks, and Deals with owner-scoped filters, sort, columns, and grouping preferences.
 - [ ] Add focused search/view validation coverage and visually verify the owner-scoped workflows.
-- [ ] Add user-facing visible-column and grouping controls to Saved Views for Contacts, Tasks, and Deals.
+- [x] Add user-facing visible-column and grouping controls to Saved Views for Contacts, Tasks, and Deals.
 - [ ] Add focused Global Search entity-matching/owner-isolation coverage and Saved View lifecycle coverage.
 - [ ] Visually exercise Global Search results and Saved View create, apply, and remove workflows with real records.
-- [ ] Apply saved visible-column preferences to Tasks and Deals list rendering.
-- [ ] Apply saved grouping preferences to Contacts, Tasks, and Deals list rendering, or remove unsupported grouping controls.
+- [x] Apply saved visible-column preferences to Tasks and Deals list rendering.
+- [x] Apply saved grouping preferences to Contacts, Tasks, and Deals list rendering, or remove unsupported grouping controls.
 - [ ] Add focused coverage that saved view columns and grouping are restored after a view is loaded.
+- [ ] Audit and close the remaining Saved Views and Global Search implementation gaps before release.
+- [ ] Ensure saved filters, sorting, selected columns, and grouping preferences are applied consistently after view loading.
+- [ ] Add deterministic owner-isolation and lifecycle coverage for Global Search and Saved Views without seeding CRM data.
+- [x] Resolve Contacts Saved View grouping by removing the unsupported grouping control while retaining supported column preferences.
+- [x] Remove the Contacts grouping control and visually verify the remaining supported column control.
+- [x] Ensure grouping controls remain available for Tasks and Deals after Contacts grouping is removed.
+- [x] Add focused regression coverage for Contacts column-only controls and Tasks/Deals grouping-capable controls.
 - [x] Define and obtain approval for owner-scoped products, price-book entries, and deal/quote line-item catalog references.
 - [ ] Build owner-managed product and price-book controls within the existing Deals workspace.
 - [ ] Add catalog-backed deal and quote line items with snapshot pricing, discounts, taxes, and recalculated totals.
@@ -108,6 +115,21 @@
 - [ ] Extend the primary quote create/edit controls with product selection and discount/tax inputs while retaining free-form line items.
 - [ ] Add focused initial-quote and quote-item update/remove commercial snapshot coverage.
 - [ ] Add focused catalog/pricing calculation coverage and visually verify the commercial workflow.
+- [ ] Enforce workspace-member record access centrally for all member-scoped collaboration procedures.
+- [ ] Add deterministic role-boundary coverage for owner, manager, contributor, inactive-member, and unknown-user access.
+- [ ] Add deterministic lifecycle coverage for import profiles, lead-source persistence, Contact 360°, global search, saved views, and commercial snapshots.
+- [ ] Perform non-fabricated UI validation for available existing records and document any checks that require user-provided CRM data.
+- [ ] Create a clearly labeled temporary validation dataset for CRM workflow checks without using it in automated tests.
+- [ ] Exercise Contacts, Imports, Contact 360°, Global Search, Saved Views, Products, Quotes, and collaboration controls using the temporary dataset.
+- [ ] Remove all temporary validation records and verify the workspace is returned to its prior empty state.
+- [x] Assess the current Manus OAuth flow and define the Google authentication account-linking model.
+- [x] Obtain approval for any Google identity fields, redirect handling, and user-account matching rules before changing the schema.
+- [x] Apply the approved additive Google identity and application-session schema migration.
+- [ ] Provide Google Cloud OAuth web-client credentials and register the approved redirect URIs before implementation.
+- [ ] Implement Google sign-in, account linking, session handling, and safe fallback to the existing authentication method.
+- [ ] Add focused authentication validation and document required Google Cloud configuration and redirect URIs.
+- [x] Centralize member-scoped record visibility rules for owner, manager, contributor, inactive-member, and unknown-user access.
+- [x] Add deterministic role-boundary coverage for assigned-record visibility and manager-only coordination.
 - [x] Replace fixed-window scheduled-work run keys with invocation-safe idempotency keys that support every accepted cron frequency.
 - [x] Add automated coverage for cron-only authorization, owner-bound schedule lookup, successful runs, failed retries, and duplicate-run behavior.
 - [x] Revalidate reliable follow-through correctness before checkpointing the milestone.
