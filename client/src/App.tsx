@@ -10,25 +10,27 @@ import { DealsWorkspace, ExportsWorkspace, PipelinesWorkspace, TasksWorkspace } 
 import { ContactsWorkspace } from "./pages/DataManagementPanels";
 import { ImportsWorkspace } from "./pages/ImportDataQualityPanel";
 import ImportReview from "./pages/ImportReview";
+import Home from "./pages/Home";
+
+function DashboardRouter() {
+  return <DashboardLayout><Switch>
+    <Route path={"/contacts"} component={ContactsWorkspace} />
+    <Route path={"/lists"} component={ListsPage} />
+    <Route path={"/imports/review"} component={ImportReview} />
+    <Route path={"/imports"} component={ImportsWorkspace} />
+    <Route path={"/tasks"} component={TasksWorkspace} />
+    <Route path={"/deals"} component={DealsWorkspace} />
+    <Route path={"/pipelines"} component={PipelinesWorkspace} />
+    <Route path={"/exports"} component={ExportsWorkspace} />
+    <Route component={NotFound} />
+  </Switch></DashboardLayout>;
+}
 
 function Router() {
-  return (
-    <DashboardLayout>
-      <Switch>
-        <Route path={"/"} component={ContactsWorkspace} />
-        <Route path={"/contacts"} component={ContactsWorkspace} />
-        <Route path={"/lists"} component={ListsPage} />
-        <Route path={"/imports/review"} component={ImportReview} />
-        <Route path={"/imports"} component={ImportsWorkspace} />
-        <Route path={"/tasks"} component={TasksWorkspace} />
-        <Route path={"/deals"} component={DealsWorkspace} />
-        <Route path={"/pipelines"} component={PipelinesWorkspace} />
-        <Route path={"/exports"} component={ExportsWorkspace} />
-        <Route path={"/404"} component={NotFound} />
-        <Route component={NotFound} />
-      </Switch>
-    </DashboardLayout>
-  );
+  return <Switch>
+    <Route path={"/"} component={Home} />
+    <Route><DashboardRouter /></Route>
+  </Switch>;
 }
 
 // NOTE: About Theme
