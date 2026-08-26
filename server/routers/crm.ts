@@ -66,6 +66,13 @@ export function parseSavedViewConfig(configJson: string) {
 export function sortGlobalSearchResults<T extends { occurredAt: Date }>(results: T[], limit: number) {
   return [...results].sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime()).slice(0, limit);
 }
+
+export function buildDashboardHealth(input: { openTasks: Array<{ dueAt: Date | null }>; now: Date }) {
+  const weekEnd = new Date(input.now.getTime() + 7 * 86_400_000);
+  const overdueTasks = input.openTasks.filter(task => task.dueAt && task.dueAt.getTime() < input.now.getTime()).length;
+  const tasksDueThisWeek = input.openTasks.filter(task => task.dueAt && task.dueAt.getTime() >= input.now.getTime() && task.dueAt.getTime() <= weekEnd.getTime()).length;
+  return { overdueTasks, tasksDueThisWeek };
+}
 const sixFieldCronSchema = z.string().trim().max(128).refine(
   isSupportedCronExpression,
   "Use every 5/10/15/30 minutes, hourly, or a fixed daily/weekly UTC hour."
@@ -404,15 +411,25 @@ export const crmRouter = router({
   dashboard: protectedProcedure.query(async ({ ctx }) => {
     const db = await requireDb();
     await ensureDefaultPipeline(ctx.user.id);
-    const [allContacts] = await db.select({ count: contacts.id }).from(contacts).where(and(eq(contacts.ownerId, ctx.user.id), isNull(contacts.archivedAt)));
-    const openTasks = await db.select().from(followUps).where(and(eq(followUps.ownerId, ctx.user.id), isNull(followUps.completedAt), isNull(followUps.archivedAt)));
+    const now = new Date();
+    const weekStart = new Date(now.getTime() - 7 * 86_400_000);
+    const [ownerContacts, openTasks] = await Promise.all([
+      db.select({ id: contacts.id, createdAt: contacts.createdAt }).from(contacts).where(and(eq(contacts.ownerId, ctx.user.id), isNull(contacts.archivedAt))),
+      db.select({ dueAt: followUps.dueAt }).from(followUps).where(and(eq(followUps.ownerId, ctx.user.id), isNull(followUps.completedAt), isNull(followUps.archivedAt))),
+    ]);
     const ownerDeals = await db.select({ deal: deals, stage: pipelineStages }).from(deals).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).where(eq(deals.ownerId, ctx.user.id));
     const weightedForecast = ownerDeals.filter(item => item.stage.stageKind === "open").reduce((sum, item) => sum + Number(item.deal.amount) * (Number(item.stage.probability) / 100), 0);
+    const openDealCount = ownerDeals.filter(item => item.stage.stageKind === "open").length;
+    const health = buildDashboardHealth({ openTasks, now });
     return {
-      contacts: allContacts?.count ?? 0,
+      contacts: ownerContacts.length,
       openTasks: openTasks.length,
-      openDeals: ownerDeals.filter(item => item.stage.stageKind === "open").length,
+      openDeals: openDealCount,
       weightedForecast,
+      overdueTasks: health.overdueTasks,
+      tasksDueThisWeek: health.tasksDueThisWeek,
+      newContactsThisWeek: ownerContacts.filter(contact => contact.createdAt.getTime() >= weekStart.getTime()).length,
+      hasActivePipeline: openDealCount > 0,
     };
   }),
 

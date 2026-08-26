@@ -101,14 +101,14 @@ function ContactOperationsPanel() {
     setSelectedIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   }
 
-  return <section className="mt-6 rounded-xl border bg-card p-5 shadow-sm">
+  return <section className="flow-surface mt-8 rounded-2xl p-5 md:p-6">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="font-semibold">Data management workspace</h2><p className="mt-1 text-sm text-muted-foreground">Edit records, review normalized-email duplicates, preview merges, and apply safe bulk actions.</p></div>
-      <Badge variant="secondary">{duplicates.data?.length ?? 0} duplicate groups</Badge>
+      <div><p className="flow-kicker">Supporting controls</p><h2 className="mt-2 font-semibold text-slate-950">Data management workspace</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">Edit records, review normalized-email duplicates, preview merges, and apply safe bulk actions without crowding the primary contact list.</p></div>
+      <Badge variant="secondary" className="relative z-10 border-blue-100 bg-blue-50 text-blue-700">{duplicates.data?.length ?? 0} duplicate groups</Badge>
     </div>
     <div className="mt-5 grid gap-6 xl:grid-cols-2">
       <div className="space-y-4">
-        <div className="rounded-lg border p-4">
+        <div className="relative z-10 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm">
           <h3 className="font-medium">Bulk contact actions</h3>
           <div className="mt-3 max-h-40 space-y-2 overflow-auto">
             {rows.map(({ contact }) => <label key={contact.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedIds.includes(contact.id)} onChange={() => toggleContact(contact.id)}/><span>{contact.firstName} {contact.lastName}</span>{contact.archivedAt && <Badge variant="outline">Archived</Badge>}</label>)}
@@ -120,7 +120,7 @@ function ContactOperationsPanel() {
           </div>
           <Button className="mt-3" disabled={!selectedIds.length || bulk.isPending || (bulkAction === "addToList" && !bulkListId)} onClick={() => bulk.mutate({ ids: selectedIds, action: bulkAction, relationshipStage: bulkAction === "relationshipStage" ? bulkStage : undefined, listId: bulkAction === "addToList" ? Number(bulkListId) : undefined })}><Layers3 className="mr-2 h-4 w-4"/>Apply to {selectedIds.length} selected</Button>
         </div>
-        <div className="rounded-lg border p-4">
+        <div className="relative z-10 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm">
           <h3 className="font-medium">Duplicate review & merge preview</h3>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <select value={sourceId} onChange={event => setSourceId(event.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm"><option value="">Choose duplicate source</option>{duplicateContacts.map(contact => <option key={contact.id} value={contact.id}>{contact.firstName} {contact.lastName} · {contact.email}</option>)}</select>
@@ -130,7 +130,7 @@ function ContactOperationsPanel() {
           <Button className="mt-3" disabled={!preview.data || merge.isPending} onClick={() => merge.mutate({ sourceId: Number(sourceId), survivorId: Number(survivorId) })}><UsersRound className="mr-2 h-4 w-4"/>Confirm merge</Button>
         </div>
       </div>
-      <div className="rounded-lg border p-4">
+      <div className="relative z-10 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm">
         <h3 className="font-medium">Contact editor</h3>
         <select className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm" value={editorId ?? ""} onChange={event => setEditorId(event.target.value ? Number(event.target.value) : null)}><option value="">Choose contact</option>{rows.map(({ contact }) => <option key={contact.id} value={contact.id}>{contact.firstName} {contact.lastName}</option>)}</select>
         {selected && <>

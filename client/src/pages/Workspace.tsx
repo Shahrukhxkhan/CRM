@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Archive, ArrowRightLeft, Check, Download, FileUp, Plus, Search, UploadCloud } from "lucide-react";
+import { Archive, ArrowRightLeft, BriefcaseBusiness, Check, ContactRound, Download, FileUp, ListChecks, Plus, Search, TrendingUp, UploadCloud } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { getSavedViewPresentationMode, type SavedViewEntityType } from "@shared/savedViewPresentation";
 
@@ -33,18 +33,18 @@ function ViewPresentationControls({ columns, selectedColumns, onColumnsChange, g
 }
 
 function SectionHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
-  return <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">{eyebrow}</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">{title}</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">{description}</p></div>{action}</div>;
+  return <div className="flex flex-col gap-4 border-b border-border/80 pb-6 sm:flex-row sm:items-end sm:justify-between"><div><p className="flow-kicker">{eyebrow}</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.035em] text-slate-950">{title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p></div>{action && <div className="shrink-0">{action}</div>}</div>;
 }
 
 function MetricStrip() {
   const { data, isLoading } = trpc.crm.dashboard.useQuery();
   const metrics = [
-    ["Active contacts", data?.contacts ?? 0],
-    ["Open tasks", data?.openTasks ?? 0],
-    ["Open deals", data?.openDeals ?? 0],
-    ["Weighted forecast", formatCurrency(data?.weightedForecast ?? 0)],
+    { label: "Active contacts", value: data?.contacts ?? 0, hint: data?.newContactsThisWeek ? `+${data.newContactsThisWeek} added in 7 days` : "No new contacts in 7 days", icon: ContactRound, tone: "text-blue-600 bg-blue-50", status: data?.newContactsThisWeek ? "Growing" : "Steady", statusTone: "text-blue-700 bg-blue-50" },
+    { label: "Open tasks", value: data?.openTasks ?? 0, hint: data?.overdueTasks ? `${data.overdueTasks} overdue — needs attention` : data?.tasksDueThisWeek ? `${data.tasksDueThisWeek} due in 7 days` : "No dated tasks this week", icon: ListChecks, tone: data?.overdueTasks ? "text-rose-600 bg-rose-50" : "text-amber-600 bg-amber-50", status: data?.overdueTasks ? "At risk" : "On track", statusTone: data?.overdueTasks ? "text-rose-700 bg-rose-50" : "text-emerald-700 bg-emerald-50" },
+    { label: "Open deals", value: data?.openDeals ?? 0, hint: data?.hasActivePipeline ? "Active pipeline coverage" : "No active pipeline coverage", icon: BriefcaseBusiness, tone: "text-violet-600 bg-violet-50", status: data?.hasActivePipeline ? "Active" : "Quiet", statusTone: data?.hasActivePipeline ? "text-violet-700 bg-violet-50" : "text-slate-600 bg-slate-100" },
+    { label: "Weighted forecast", value: formatCurrency(data?.weightedForecast ?? 0), hint: data?.weightedForecast ? "Weighted from open stages" : "Add deals to build forecast", icon: TrendingUp, tone: "text-emerald-600 bg-emerald-50", status: data?.weightedForecast ? "Forecasting" : "No forecast", statusTone: data?.weightedForecast ? "text-emerald-700 bg-emerald-50" : "text-slate-600 bg-slate-100" },
   ];
-  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{metrics.map(([label, value]) => <div key={String(label)} className="rounded-xl border bg-card px-4 py-3 shadow-sm"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-semibold tracking-tight">{isLoading ? "…" : value}</p></div>)}</div>;
+  return <section aria-label="Workspace health" className="grid grid-cols-2 gap-3 lg:grid-cols-4">{metrics.map(({ label, value, hint, icon: Icon, tone, status, statusTone }) => <div key={label} className="flow-metric rounded-2xl p-4"><div className="relative z-10 flex items-start justify-between gap-3"><div><p className="text-xs font-medium text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{isLoading ? "…" : value}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">{hint}</p></div><div className="flex flex-col items-end gap-2"><span className={`grid h-9 w-9 place-items-center rounded-xl ${tone}`}><Icon className="h-4 w-4"/></span><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusTone}`}>{status}</span></div></div></div>)}</section>;
 }
 
 function ContactForm({ onDone }: { onDone: () => void }) {

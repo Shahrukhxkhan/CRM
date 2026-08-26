@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAgingBuckets, buildContact360ActivityTimeline, buildContact360Summary, buildSourceQualityRows, calculateCommercialLine, calculateCommercialSummary, calculateQuoteTotal, canActivateCalendarAutomation, canAssignWorkspaceUser, canCoordinateWorkspace, canReadWorkspaceRecord, classifyImportRows, isContact360StandardActivityType, isValidReportRange, mapRawImportRows, nextDueDate, normalizeEmail, parseSavedViewConfig, quoteStatusSchema, resolveLeadSource, serializeCustomFieldValue, sortGlobalSearchResults } from "./crm";
+import { buildAgingBuckets, buildContact360ActivityTimeline, buildContact360Summary, buildDashboardHealth, buildSourceQualityRows, calculateCommercialLine, calculateCommercialSummary, calculateQuoteTotal, canActivateCalendarAutomation, canAssignWorkspaceUser, canCoordinateWorkspace, canReadWorkspaceRecord, classifyImportRows, isContact360StandardActivityType, isValidReportRange, mapRawImportRows, nextDueDate, normalizeEmail, parseSavedViewConfig, quoteStatusSchema, resolveLeadSource, serializeCustomFieldValue, sortGlobalSearchResults } from "./crm";
 import { isCronOnlyCaller, makeRunKey, shouldRetryRunStatus } from "../scheduledWork";
 import { getSavedViewPresentationMode } from "@shared/savedViewPresentation";
 
@@ -8,6 +8,21 @@ describe("CRM duplicate detection", () => {
     expect(normalizeEmail("  Ada.Lovelace@Example.COM ")).toBe("ada.lovelace@example.com");
     expect(normalizeEmail(" ")).toBeNull();
     expect(normalizeEmail(null)).toBeNull();
+  });
+});
+
+describe("dashboard health signals", () => {
+  it("separates overdue work from tasks due in the next seven days", () => {
+    const health = buildDashboardHealth({
+      now: new Date("2026-08-26T12:00:00.000Z"),
+      openTasks: [
+        { dueAt: new Date("2026-08-25T12:00:00.000Z") },
+        { dueAt: new Date("2026-08-28T12:00:00.000Z") },
+        { dueAt: new Date("2026-09-05T12:00:00.000Z") },
+        { dueAt: null },
+      ],
+    });
+    expect(health).toEqual({ overdueTasks: 1, tasksDueThisWeek: 1 });
   });
 });
 

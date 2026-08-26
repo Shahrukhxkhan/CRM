@@ -29,17 +29,34 @@ function Badge({
   className,
   variant,
   asChild = false,
+  children,
   ...props
 }: React.ComponentProps<"span"> &
   VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
   const Comp = asChild ? Slot : "span";
+  const label = typeof children === "string" ? children.toLowerCase() : "";
+  const isRelationshipStage = variant === "secondary" && ["lead", "prospecting", "qualified", "proposal", "negotiation", "won", "lost"].includes(label);
+  const semanticTone = variant === "secondary"
+    ? label === "archived" ? "border-amber-200 bg-amber-50 text-amber-800"
+      : ["lead", "prospecting"].includes(label) ? "border-slate-200 bg-slate-100 text-slate-700"
+        : ["qualified", "proposal", "negotiation"].includes(label) ? "border-blue-200 bg-blue-50 text-blue-800"
+          : ["won", "accepted", "completed"].includes(label) ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : ["lost", "declined"].includes(label) ? "border-rose-200 bg-rose-50 text-rose-800"
+              : "border-slate-200 bg-slate-100 text-slate-700"
+    : "";
+
+  if (isRelationshipStage) {
+    return <span className="inline-flex items-center gap-1.5"><span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">Active</span><Comp data-slot="badge" className={cn(badgeVariants({ variant }), semanticTone, className)} {...props}><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current opacity-70"/>{children}</Comp></span>;
+  }
 
   return (
     <Comp
       data-slot="badge"
-      className={cn(badgeVariants({ variant }), className)}
+      className={cn(badgeVariants({ variant }), semanticTone, className)}
       {...props}
-    />
+    >
+      {children}
+    </Comp>
   );
 }
 

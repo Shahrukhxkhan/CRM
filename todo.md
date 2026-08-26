@@ -128,13 +128,26 @@
 - [x] Add a classic repository README covering SoloFlowCRM architecture, local setup, validation, current capabilities, and deferred integrations.
 - [x] Add the standard MIT LICENSE file to complete repository setup.
 - [x] Create a responsive public landing page with navigation and footer while preserving authenticated CRM routes.
-- [ ] Verify the GitHub main branch contains README.md and synchronize the completed repository setup updates if it does not.
+- [x] Review the landing page and CRM workspace UI, then prioritize constraint-aware visual and usability improvements.
+- [x] Unify the CRM workspace and landing-page visual system with shared navy/blue hierarchy and interaction treatment.
+- [x] Add a recognisable customer-flow visual motif across primary product surfaces.
+- [x] Improve Contacts workspace hierarchy by grouping supporting controls and reducing equal-weight card density.
+- [x] Upgrade dashboard metrics with real priority, status, and trend presentation.
+- [x] Refine Contacts table scanning with explicit responsive density behavior and stronger status hierarchy.
+- [x] Add explicit active, archived, and relationship-stage status hierarchy to Contacts table rows.
+- [x] Add a separate visible active-state indicator alongside relationship-stage badges in Contacts rows.
+- [x] Re-run desktop/mobile visual validation after metric-status and responsive-table refinements.
+- [ ] Push the validated visual-system, dashboard-health, and Contacts table refinements to GitHub main.
+- [x] Verify the GitHub main branch contains README.md and synchronize the completed repository setup updates if it does not.
 - [x] Assess the current Manus OAuth flow and define the Google authentication account-linking model.
 - [x] Obtain approval for any Google identity fields, redirect handling, and user-account matching rules before changing the schema.
 - [x] Apply the approved additive Google identity and application-session schema migration.
 - [ ] Provide Google Cloud OAuth web-client credentials and register the approved redirect URIs before implementation.
 - [ ] Implement Google sign-in, account linking, session handling, and safe fallback to the existing authentication method.
 - [ ] Add focused authentication validation and document required Google Cloud configuration and redirect URIs.
+- [ ] Securely collect the prepared Google OAuth web-client credentials after confirming the registered preview callback URI.
+- [ ] Add Google OIDC authorization-code flow with PKCE, state/nonce verification, ID-token validation, account linking, and hashed app sessions.
+- [ ] Validate Google authentication fallback/logout behavior and document the production callback URI requirement.
 - [x] Centralize member-scoped record visibility rules for owner, manager, contributor, inactive-member, and unknown-user access.
 - [x] Add deterministic role-boundary coverage for assigned-record visibility and manager-only coordination.
 - [x] Replace fixed-window scheduled-work run keys with invocation-safe idempotency keys that support every accepted cron frequency.

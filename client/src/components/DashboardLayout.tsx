@@ -169,10 +169,10 @@ function DashboardLayoutContent({
       <div className="relative" ref={sidebarRef}>
         <Sidebar
           collapsible="icon"
-          className="border-r-0"
+          className="border-r border-sidebar-border bg-sidebar/95 shadow-[10px_0_30px_-28px_rgba(15,23,42,0.34)]"
           disableTransition={isResizing}
         >
-          <SidebarHeader className="h-16 justify-center">
+          <SidebarHeader className="h-16 justify-center border-b border-sidebar-border/80">
             <div className="flex items-center gap-3 px-2 transition-all w-full">
               <button
                 onClick={toggleSidebar}
@@ -183,9 +183,8 @@ function DashboardLayoutContent({
               </button>
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-semibold tracking-tight truncate">
-                      SoloFlow CRM
-                  </span>
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-slate-950 text-[9px] font-bold text-white">SF</span>
+                    <span className="font-semibold tracking-tight truncate">SoloFlow<span className="text-blue-600">CRM</span></span>
                 </div>
               ) : null}
             </div>
@@ -201,7 +200,7 @@ function DashboardLayoutContent({
                       isActive={isActive}
                       onClick={() => setLocation(item.path)}
                       tooltip={item.label}
-                      className={`h-10 transition-all font-normal`}
+                      className={`h-10 rounded-lg transition-all font-medium ${isActive ? "bg-blue-50 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
                     >
                       <item.icon
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
@@ -214,7 +213,7 @@ function DashboardLayoutContent({
             </SidebarMenu>
           </SidebarContent>
 
-          <SidebarFooter className="p-3">
+          <SidebarFooter className="border-t border-sidebar-border/80 p-3">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -256,7 +255,7 @@ function DashboardLayoutContent({
       </div>
 
       <SidebarInset>
-        <div className="flex min-h-14 items-center border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:backdrop-blur"><GlobalSearch/></div>
+        <div className="flex min-h-14 items-center border-b border-border/80 bg-background/90 px-4 backdrop-blur supports-[backdrop-filter]:backdrop-blur"><div className="h-5 w-1 rounded-full bg-gradient-to-b from-blue-500 to-cyan-400"/><div className="ml-3 flex-1"><GlobalSearch/></div></div>
         {isMobile && (
           <div className="flex border-b h-14 items-center justify-between bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
             <div className="flex items-center gap-2">
@@ -271,7 +270,7 @@ function DashboardLayoutContent({
             </div>
           </div>
         )}
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flow-shell flex-1 p-4 md:p-6">{children}</main>
       </SidebarInset>
     </>
   );
