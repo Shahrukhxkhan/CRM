@@ -131,6 +131,21 @@
   .flow-shell table thead th { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid oklch(0.9 0.012 255); }
   .flow-shell table [data-slot="badge"] { border: 1px solid oklch(0.86 0.025 255); border-radius: 999px; background: oklch(0.965 0.015 255); color: oklch(0.34 0.06 264); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.01em; }
 
+  .dark .landing-page { background: radial-gradient(circle at 78% 3%, oklch(0.27 0.06 255 / 55%), transparent 29%), oklch(0.16 0.025 264); color: oklch(0.91 0.008 260); }
+  .dark .landing-nav { border-color: oklch(1 0 0 / 10%); background: oklch(0.14 0.025 264 / 88%); }
+  .dark .landing-mobile-menu { border-color: oklch(1 0 0 / 10%); background: oklch(0.19 0.028 264); }
+  .dark .landing-hero { background: linear-gradient(180deg, oklch(0.17 0.032 264 / 40%), transparent 82%); }
+  .dark .landing-section, .dark .landing-footer { border-color: oklch(1 0 0 / 10%); background: oklch(0.19 0.028 264); }
+  .dark .landing-card { border-color: oklch(1 0 0 / 10%); background: linear-gradient(145deg, oklch(0.23 0.034 264), oklch(0.19 0.028 264)); box-shadow: 0 16px 34px -28px oklch(0 0 0 / 75%); }
+  .dark .landing-title, .dark .landing-hero-title { color: oklch(0.94 0.006 260); }
+  .dark .landing-muted { color: oklch(0.74 0.012 260); }
+  .dark .landing-link { color: oklch(0.79 0.012 260); }
+  .dark .landing-link:hover { color: oklch(0.78 0.15 250); }
+  .dark .landing-eyebrow { border-color: oklch(0.47 0.11 255 / 45%); background: oklch(0.31 0.06 255 / 55%); color: oklch(0.79 0.12 250); }
+  .dark .landing-cta-secondary { border-color: oklch(1 0 0 / 17%); background: oklch(0.24 0.03 264); color: oklch(0.87 0.008 260); }
+  .dark .landing-cta-secondary:hover { border-color: oklch(0.65 0.14 250 / 60%); background: oklch(0.29 0.045 264); }
+  .dark .landing-footer-meta { border-color: oklch(1 0 0 / 8%); color: oklch(0.65 0.01 260); }
+
   @media (max-width: 640px) {
     .flow-shell .overflow-x-auto { border-radius: 0.75rem; -webkit-overflow-scrolling: touch; }
     .flow-shell table { min-width: 640px !important; }

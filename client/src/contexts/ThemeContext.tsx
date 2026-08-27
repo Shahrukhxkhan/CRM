@@ -2,6 +2,10 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
 
+export function resolveTheme(storedTheme: string | null, defaultTheme: Theme): Theme {
+  return storedTheme === "light" || storedTheme === "dark" ? storedTheme : defaultTheme;
+}
+
 interface ThemeContextType {
   theme: Theme;
   toggleTheme?: () => void;
@@ -24,7 +28,7 @@ export function ThemeProvider({
   const [theme, setTheme] = useState<Theme>(() => {
     if (switchable) {
       const stored = localStorage.getItem("theme");
-      return (stored as Theme) || defaultTheme;
+      return resolveTheme(stored, defaultTheme);
     }
     return defaultTheme;
   });

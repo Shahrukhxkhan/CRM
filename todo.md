@@ -119,12 +119,13 @@
 - [ ] Add deterministic role-boundary coverage for owner, manager, contributor, inactive-member, and unknown-user access.
 - [ ] Add deterministic lifecycle coverage for import profiles, lead-source persistence, Contact 360°, global search, saved views, and commercial snapshots.
 - [ ] Perform non-fabricated UI validation for available existing records and document any checks that require user-provided CRM data.
-- [ ] Create a clearly labeled temporary validation dataset for CRM workflow checks without using it in automated tests.
+- [x] Create a clearly labeled temporary validation dataset for CRM workflow checks without using it in automated tests.
 - [ ] Exercise Contacts, Imports, Contact 360°, Global Search, Saved Views, Products, Quotes, and collaboration controls using the temporary dataset.
-- [ ] Remove all temporary validation records and verify the workspace is returned to its prior empty state.
-- [ ] Create a clearly labeled temporary owner-scoped dataset for Saved Views and Global Search validation only.
+- [x] Remove all temporary validation records and verify the workspace is returned to its prior empty state.
+- [x] Create a clearly labeled temporary owner-scoped dataset for Saved Views and Global Search validation only.
 - [ ] Exercise create, apply, and remove Saved View workflows plus Global Search result matching with temporary records.
 - [ ] Capture temporary-data validation evidence, remove every temporary business record, and verify the workspace is empty again.
+- [x] Document that interactive Saved View and Global Search validation was blocked by the signed-out browser session before temporary-data cleanup.
 - [x] Add a classic repository README covering SoloFlowCRM architecture, local setup, validation, current capabilities, and deferred integrations.
 - [x] Add the standard MIT LICENSE file to complete repository setup.
 - [x] Create a responsive public landing page with navigation and footer while preserving authenticated CRM routes.
@@ -137,7 +138,9 @@
 - [x] Add explicit active, archived, and relationship-stage status hierarchy to Contacts table rows.
 - [x] Add a separate visible active-state indicator alongside relationship-stage badges in Contacts rows.
 - [x] Re-run desktop/mobile visual validation after metric-status and responsive-table refinements.
-- [ ] Push the validated visual-system, dashboard-health, and Contacts table refinements to GitHub main.
+- [x] Push the validated visual-system, dashboard-health, and Contacts table refinements to GitHub main.
+- [x] Add an accessible dark-mode toggle to the public navigation bar and validate the landing-page visual system in both themes.
+- [ ] Push the dark-mode enhancement and temporary-data cleanup checkpoint to GitHub main before ending today’s work.
 - [x] Verify the GitHub main branch contains README.md and synchronize the completed repository setup updates if it does not.
 - [x] Assess the current Manus OAuth flow and define the Google authentication account-linking model.
 - [x] Obtain approval for any Google identity fields, redirect handling, and user-account matching rules before changing the schema.
