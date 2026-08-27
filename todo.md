@@ -140,7 +140,7 @@
 - [x] Re-run desktop/mobile visual validation after metric-status and responsive-table refinements.
 - [x] Push the validated visual-system, dashboard-health, and Contacts table refinements to GitHub main.
 - [x] Add an accessible dark-mode toggle to the public navigation bar and validate the landing-page visual system in both themes.
-- [ ] Push the dark-mode enhancement and temporary-data cleanup checkpoint to GitHub main before ending today’s work.
+- [x] Push the dark-mode enhancement and temporary-data cleanup checkpoint to GitHub main before ending today’s work.
 - [x] Verify the GitHub main branch contains README.md and synchronize the completed repository setup updates if it does not.
 - [x] Assess the current Manus OAuth flow and define the Google authentication account-linking model.
 - [x] Obtain approval for any Google identity fields, redirect handling, and user-account matching rules before changing the schema.
