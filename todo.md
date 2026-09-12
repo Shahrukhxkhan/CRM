@@ -161,3 +161,4 @@
 - [x] Revalidate reliable follow-through correctness after cron and callback test coverage fixes.
 - [x] Revalidate persisted export cron expressions before schedule activation or execution.
 - [x] Complete fresh UI and database verification after the final scheduling fixes.
+- [ ] Push the latest Saved Views and Global Search hardening checkpoint to GitHub main and verify the remote head.
