@@ -93,10 +93,11 @@
 - [ ] Visually exercise Global Search results and Saved View create, apply, and remove workflows with real records.
 - [x] Apply saved visible-column preferences to Tasks and Deals list rendering.
 - [x] Apply saved grouping preferences to Contacts, Tasks, and Deals list rendering, or remove unsupported grouping controls.
-- [ ] Add focused coverage that saved view columns and grouping are restored after a view is loaded.
+- [x] Add focused coverage that saved view columns and grouping are restored after a view is loaded.
 - [ ] Audit and close the remaining Saved Views and Global Search implementation gaps before release.
-- [ ] Ensure saved filters, sorting, selected columns, and grouping preferences are applied consistently after view loading.
+- [x] Ensure saved filters, sorting, selected columns, and grouping preferences are applied consistently after view loading.
 - [ ] Add deterministic owner-isolation and lifecycle coverage for Global Search and Saved Views without seeding CRM data.
+- [x] Add focused client-side regression coverage for Saved View load/apply handlers across Contacts, Tasks, and Deals.
 - [x] Resolve Contacts Saved View grouping by removing the unsupported grouping control while retaining supported column preferences.
 - [x] Remove the Contacts grouping control and visually verify the remaining supported column control.
 - [x] Ensure grouping controls remain available for Tasks and Deals after Contacts grouping is removed.
@@ -161,4 +162,4 @@
 - [x] Revalidate reliable follow-through correctness after cron and callback test coverage fixes.
 - [x] Revalidate persisted export cron expressions before schedule activation or execution.
 - [x] Complete fresh UI and database verification after the final scheduling fixes.
-- [ ] Push the latest Saved Views and Global Search hardening checkpoint to GitHub main and verify the remote head.
+- [x] Push the latest Saved Views and Global Search hardening checkpoint to GitHub main and verify the remote head.
