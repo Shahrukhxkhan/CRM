@@ -358,11 +358,17 @@ describe("deterministic collaboration role boundaries", () => {
     expect(canReadWorkspaceRecord(ownerId, contributorId, recordAssignedToOther, activeContributor)).toBe(false);
     expect(canReadWorkspaceRecord(ownerId, contributorId, null, activeContributor)).toBe(false);
 
+    // Manager can coordinate across workspace but cannot read unassigned records as direct contributor unless assigned
+    expect(canReadWorkspaceRecord(ownerId, managerId, recordAssignedToOther, activeManager)).toBe(false);
+    expect(canReadWorkspaceRecord(ownerId, managerId, managerId, activeManager)).toBe(true);
+
     // Inactive member cannot read even assigned records
     expect(canReadWorkspaceRecord(ownerId, contributorId, recordAssignedToContributor, { ...activeContributor, isActive: false })).toBe(false);
+    expect(canReadWorkspaceRecord(ownerId, managerId, managerId, inactiveManager)).toBe(false);
 
     // Unknown user has zero record visibility
     expect(canReadWorkspaceRecord(ownerId, unknownUserId, unknownUserId, null)).toBe(false);
+    expect(canReadWorkspaceRecord(ownerId, unknownUserId, recordAssignedToContributor, null)).toBe(false);
   });
 });
 

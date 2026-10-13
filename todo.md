@@ -115,7 +115,7 @@
 - [x] Extend the primary quote create/edit controls with product selection and discount/tax inputs while retaining free-form line items.
 - [x] Add focused initial-quote and quote-item update/remove commercial snapshot coverage.
 - [x] Add focused catalog/pricing calculation coverage and visually verify the commercial workflow.
-- [ ] Enforce workspace-member record access centrally for all member-scoped collaboration procedures.
+- [x] Enforce workspace-member record access centrally for all member-scoped collaboration procedures.
 - [x] Add deterministic role-boundary coverage for owner, manager, contributor, inactive-member, and unknown-user access.
 - [x] Add deterministic lifecycle coverage for import profiles, lead-source persistence, Contact 360°, global search, saved views, and commercial snapshots.
 - [ ] Perform non-fabricated UI validation for available existing records and document any checks that require user-provided CRM data.

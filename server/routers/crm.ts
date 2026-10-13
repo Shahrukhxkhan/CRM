@@ -279,6 +279,30 @@ async function requireWorkspaceCoordinator(ownerId: number, userId: number) {
   return membership;
 }
 
+export async function requireAccessibleTask(userId: number, taskId: number) {
+  const db = await requireDb();
+  const [task] = await db.select().from(followUps).where(and(eq(followUps.id, taskId), isNull(followUps.archivedAt))).limit(1);
+  if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found." });
+  if (task.ownerId === userId) return task;
+  const [membership] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.ownerId, task.ownerId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.isActive, true))).limit(1);
+  if (!canReadWorkspaceRecord(task.ownerId, userId, task.assigneeUserId, membership)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this task." });
+  }
+  return task;
+}
+
+export async function requireAccessibleDeal(userId: number, dealId: number) {
+  const db = await requireDb();
+  const [deal] = await db.select().from(deals).where(eq(deals.id, dealId)).limit(1);
+  if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
+  if (deal.ownerId === userId) return deal;
+  const [membership] = await db.select().from(workspaceMembers).where(and(eq(workspaceMembers.ownerId, deal.ownerId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.isActive, true))).limit(1);
+  if (!canReadWorkspaceRecord(deal.ownerId, userId, deal.assigneeUserId, membership)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this deal." });
+  }
+  return deal;
+}
+
 async function requireOwnedCompany(ownerId: number, companyId: number | null | undefined) {
   if (!companyId) return;
   const db = await requireDb();
@@ -1432,9 +1456,9 @@ export const crmRouter = router({
       return { id: created.id };
     }),
     complete: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const task = await requireAccessibleTask(ctx.user.id, input.id);
+      if (task.completedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Active task not found." });
       const db = await requireDb();
-      const [task] = await db.select().from(followUps).where(and(eq(followUps.id, input.id), eq(followUps.ownerId, ctx.user.id))).limit(1);
-      if (!task || task.completedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Active task not found." });
       const completedAt = new Date();
       await db.transaction(async tx => {
         const recurrence = task.recurrenceRule as z.infer<typeof recurrenceSchema> | null;
@@ -1463,14 +1487,14 @@ export const crmRouter = router({
     }),
     comments: router({
       list: protectedProcedure.input(z.object({ taskId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+        const task = await requireAccessibleTask(ctx.user.id, input.taskId);
         const db = await requireDb();
-        return db.select().from(taskComments).where(and(eq(taskComments.followUpId, input.taskId), eq(taskComments.ownerId, ctx.user.id))).orderBy(asc(taskComments.createdAt));
+        return db.select().from(taskComments).where(and(eq(taskComments.followUpId, task.id), eq(taskComments.ownerId, task.ownerId))).orderBy(asc(taskComments.createdAt));
       }),
       create: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), body: z.string().trim().min(1).max(5000) })).mutation(async ({ ctx, input }) => {
+        const task = await requireAccessibleTask(ctx.user.id, input.taskId);
         const db = await requireDb();
-        const [task] = await db.select().from(followUps).where(and(eq(followUps.id, input.taskId), eq(followUps.ownerId, ctx.user.id))).limit(1);
-        if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found." });
-        const [created] = await db.insert(taskComments).values({ ownerId: ctx.user.id, followUpId: input.taskId, body: input.body }).$returningId();
+        const [created] = await db.insert(taskComments).values({ ownerId: task.ownerId, followUpId: task.id, authorUserId: ctx.user.id, body: input.body }).$returningId();
         return { id: created.id };
       }),
     }),
@@ -1560,12 +1584,13 @@ export const crmRouter = router({
       return { records, weightedForecast };
     }),
     detail: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const dealRecord = await requireAccessibleDeal(ctx.user.id, input.id);
       const db = await requireDb();
-      const [deal] = await db.select({ deal: deals, contact: contacts, stage: pipelineStages, pipeline: pipelines }).from(deals).innerJoin(contacts, eq(deals.contactId, contacts.id)).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).innerJoin(pipelines, eq(deals.pipelineId, pipelines.id)).where(and(eq(deals.id, input.id), eq(deals.ownerId, ctx.user.id))).limit(1);
+      const [deal] = await db.select({ deal: deals, contact: contacts, stage: pipelineStages, pipeline: pipelines }).from(deals).innerJoin(contacts, eq(deals.contactId, contacts.id)).innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id)).innerJoin(pipelines, eq(deals.pipelineId, pipelines.id)).where(eq(deals.id, dealRecord.id)).limit(1);
       if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
-      const history = await db.select({ history: dealStageHistory, fromStage: pipelineStages }).from(dealStageHistory).leftJoin(pipelineStages, eq(dealStageHistory.fromStageId, pipelineStages.id)).where(and(eq(dealStageHistory.dealId, input.id), eq(dealStageHistory.ownerId, ctx.user.id))).orderBy(desc(dealStageHistory.changedAt));
-      const dealActivities = await db.select().from(activities).where(and(eq(activities.dealId, input.id), eq(activities.ownerId, ctx.user.id))).orderBy(desc(activities.occurredAt));
-      const availableStages = await db.select().from(pipelineStages).where(and(eq(pipelineStages.pipelineId, deal.deal.pipelineId), eq(pipelineStages.ownerId, ctx.user.id))).orderBy(asc(pipelineStages.position));
+      const history = await db.select({ history: dealStageHistory, fromStage: pipelineStages }).from(dealStageHistory).leftJoin(pipelineStages, eq(dealStageHistory.fromStageId, pipelineStages.id)).where(eq(dealStageHistory.dealId, dealRecord.id)).orderBy(desc(dealStageHistory.changedAt));
+      const dealActivities = await db.select().from(activities).where(eq(activities.dealId, dealRecord.id)).orderBy(desc(activities.occurredAt));
+      const availableStages = await db.select().from(pipelineStages).where(and(eq(pipelineStages.pipelineId, deal.deal.pipelineId), eq(pipelineStages.ownerId, dealRecord.ownerId))).orderBy(asc(pipelineStages.position));
       return { ...deal, history, activities: dealActivities, availableStages };
     }),
     create: protectedProcedure.input(z.object({ contactId: z.number().int().positive(), companyId: z.number().int().positive().nullable().optional(), pipelineId: z.number().int().positive().optional(), stageId: z.number().int().positive().optional(), title: z.string().trim().min(1).max(255), amount: z.number().min(0).max(999_999_999_999), expectedCloseAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
@@ -1613,10 +1638,9 @@ export const crmRouter = router({
       return { success: true };
     }),
     addActivity: protectedProcedure.input(z.object({ dealId: z.number().int().positive(), body: z.string().trim().min(1).max(5000), activityType: z.string().trim().min(1).max(64).default("note") })).mutation(async ({ ctx, input }) => {
+      const deal = await requireAccessibleDeal(ctx.user.id, input.dealId);
       const db = await requireDb();
-      const [deal] = await db.select().from(deals).where(and(eq(deals.id, input.dealId), eq(deals.ownerId, ctx.user.id))).limit(1);
-      if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found." });
-      const [created] = await db.insert(activities).values({ ownerId: ctx.user.id, contactId: deal.contactId, dealId: deal.id, activityType: input.activityType, body: input.body }).$returningId();
+      const [created] = await db.insert(activities).values({ ownerId: deal.ownerId, contactId: deal.contactId, dealId: deal.id, actorUserId: ctx.user.id, activityType: input.activityType, body: input.body }).$returningId();
       return { id: created.id };
     }),
     remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
