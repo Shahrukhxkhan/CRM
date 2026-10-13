@@ -170,8 +170,25 @@ describe("catalog-backed commercial totals", () => {
     expect(calculateCommercialLine({ quantity: 3, unitAmount: 120, discountPercent: 10, taxPercent: 5 })).toEqual({ subtotal: 360, discountAmount: 36, taxAmount: 16.2, total: 340.2 });
   });
 
+  it("handles line items with zero discount and zero tax without precision drift", () => {
+    expect(calculateCommercialLine({ quantity: 5, unitAmount: 49.99, discountPercent: 0, taxPercent: 0 })).toEqual({ subtotal: 249.95, discountAmount: 0, taxAmount: 0, total: 249.95 });
+  });
+
   it("rolls quote lines into subtotal, discount, tax, and grand total snapshots", () => {
     expect(calculateCommercialSummary([{ quantity: 2, unitAmount: 100, discountPercent: 10, taxPercent: 0 }, { quantity: 1, unitAmount: 50, discountPercent: 0, taxPercent: 20 }])).toEqual({ subtotal: 250, discountAmount: 20, taxAmount: 10, total: 240 });
+  });
+
+  it("accurately rolls mixed catalog items with 100% discount or custom taxes", () => {
+    const summary = calculateCommercialSummary([
+      { quantity: 1, unitAmount: 200, discountPercent: 100, taxPercent: 10 },
+      { quantity: 4, unitAmount: 25, discountPercent: 0, taxPercent: 5 },
+    ]);
+    expect(summary).toEqual({
+      subtotal: 300,
+      discountAmount: 200,
+      taxAmount: 5,
+      total: 105,
+    });
   });
 });
 

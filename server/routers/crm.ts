@@ -127,16 +127,29 @@ export function calculateQuoteTotal(items: Array<{ quantity: number | string; un
   return items.reduce((total, item) => total + Number(item.quantity) * Number(item.unitAmount), 0);
 }
 
+export function roundCurrency(val: number): number {
+  return Math.round((val + Number.EPSILON) * 100) / 100;
+}
+
 export function calculateCommercialLine(input: { quantity: number | string; unitAmount: number | string; discountPercent?: number | string; taxPercent?: number | string }) {
-  const subtotal = Number(input.quantity) * Number(input.unitAmount);
-  const discountAmount = subtotal * (Number(input.discountPercent ?? 0) / 100);
+  const subtotal = roundCurrency(Number(input.quantity) * Number(input.unitAmount));
+  const discountAmount = roundCurrency(subtotal * (Number(input.discountPercent ?? 0) / 100));
   const taxableAmount = subtotal - discountAmount;
-  const taxAmount = taxableAmount * (Number(input.taxPercent ?? 0) / 100);
-  return { subtotal, discountAmount, taxAmount, total: taxableAmount + taxAmount };
+  const taxAmount = roundCurrency(taxableAmount * (Number(input.taxPercent ?? 0) / 100));
+  const total = roundCurrency(taxableAmount + taxAmount);
+  return { subtotal, discountAmount, taxAmount, total };
 }
 
 export function calculateCommercialSummary(items: Array<{ quantity: number | string; unitAmount: number | string; discountPercent?: number | string | null; taxPercent?: number | string | null }>) {
-  return items.reduce((summary, item) => { const line = calculateCommercialLine({ ...item, discountPercent: item.discountPercent ?? 0, taxPercent: item.taxPercent ?? 0 }); return { subtotal: summary.subtotal + line.subtotal, discountAmount: summary.discountAmount + line.discountAmount, taxAmount: summary.taxAmount + line.taxAmount, total: summary.total + line.total }; }, { subtotal: 0, discountAmount: 0, taxAmount: 0, total: 0 });
+  return items.reduce((summary, item) => {
+    const line = calculateCommercialLine({ ...item, discountPercent: item.discountPercent ?? 0, taxPercent: item.taxPercent ?? 0 });
+    return {
+      subtotal: roundCurrency(summary.subtotal + line.subtotal),
+      discountAmount: roundCurrency(summary.discountAmount + line.discountAmount),
+      taxAmount: roundCurrency(summary.taxAmount + line.taxAmount),
+      total: roundCurrency(summary.total + line.total),
+    };
+  }, { subtotal: 0, discountAmount: 0, taxAmount: 0, total: 0 });
 }
 
 export function mapRawImportRows(rows: z.infer<typeof rawImportRowSchema>[], mapping: ImportMapping, transforms: ImportTransforms): ImportRow[] {
@@ -1176,6 +1189,18 @@ export const crmRouter = router({
         if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." });
         return { success: true };
       }),
+      archive: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const result = await db.update(products).set({ isActive: false }).where(and(eq(products.id, input.id), eq(products.ownerId, ctx.user.id)));
+        if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." });
+        return { success: true };
+      }),
+      delete: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const result = await db.delete(products).where(and(eq(products.id, input.id), eq(products.ownerId, ctx.user.id)));
+        if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." });
+        return { success: true };
+      }),
     }),
     priceBook: router({
       list: protectedProcedure.input(z.object({ productId: z.number().int().positive().optional() }).default({})).query(async ({ ctx, input }) => {
@@ -1194,6 +1219,12 @@ export const crmRouter = router({
         if (input.effectiveFrom && input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw new TRPCError({ code: "BAD_REQUEST", message: "The price end date must follow its start date." });
         const db = await requireDb();
         const result = await db.update(priceBookEntries).set({ unitAmount: input.unitAmount.toFixed(2), effectiveFrom: input.effectiveFrom ?? null, effectiveTo: input.effectiveTo ?? null, isActive: input.isActive }).where(and(eq(priceBookEntries.id, input.id), eq(priceBookEntries.ownerId, ctx.user.id)));
+        if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Price book entry not found." });
+        return { success: true };
+      }),
+      delete: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        const db = await requireDb();
+        const result = await db.delete(priceBookEntries).where(and(eq(priceBookEntries.id, input.id), eq(priceBookEntries.ownerId, ctx.user.id)));
         if (!result[0].affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Price book entry not found." });
         return { success: true };
       }),
@@ -1331,12 +1362,40 @@ export const crmRouter = router({
         await db.update(quotes).set({ subtotalAmount: summary.subtotal.toFixed(2), discountAmount: summary.discountAmount.toFixed(2), taxAmount: summary.taxAmount.toFixed(2), totalAmount: summary.total.toFixed(2) }).where(eq(quotes.id, quote.id));
         return { id: created.id };
       }),
-      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), description: z.string().trim().min(1).max(512), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000), discountPercent: z.number().min(0).max(100).optional(), taxPercent: z.number().min(0).max(100).optional() })).mutation(async ({ ctx, input }) => {
+      update: protectedProcedure.input(z.object({ id: z.number().int().positive(), description: z.string().trim().min(1).max(512).optional(), productId: z.number().int().positive().nullable().optional(), quantity: z.number().positive().max(1_000_000), unitAmount: z.number().min(0).max(1_000_000_000).optional(), discountPercent: z.number().min(0).max(100).optional(), taxPercent: z.number().min(0).max(100).optional() })).mutation(async ({ ctx, input }) => {
         const db = await requireDb();
         const [item] = await db.select({ item: quoteItems, quote: quotes }).from(quoteItems).innerJoin(quotes, eq(quoteItems.quoteId, quotes.id)).where(and(eq(quoteItems.id, input.id), eq(quotes.ownerId, ctx.user.id))).limit(1);
         if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Quote item not found." });
-        const discountPercent = input.discountPercent ?? Number(item.item.discountPercent); const taxPercent = input.taxPercent ?? Number(item.item.taxPercent); const line = calculateCommercialLine({ quantity: input.quantity, unitAmount: input.unitAmount, discountPercent, taxPercent });
-        await db.update(quoteItems).set({ description: input.description, quantity: input.quantity.toFixed(2), unitAmount: input.unitAmount.toFixed(2), discountPercent: discountPercent.toFixed(2), taxPercent: taxPercent.toFixed(2), lineSubtotal: line.subtotal.toFixed(2), discountAmount: line.discountAmount.toFixed(2), taxAmount: line.taxAmount.toFixed(2), lineTotal: line.total.toFixed(2) }).where(eq(quoteItems.id, item.item.id));
+        let product: typeof products.$inferSelect | undefined;
+        if (input.productId !== undefined) {
+          if (input.productId) {
+            [product] = await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.ownerId, ctx.user.id))).limit(1);
+            if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Product not found." });
+          }
+        }
+        const description = input.description ?? (product ? product.name : item.item.description);
+        const unitAmount = input.unitAmount ?? (product ? Number(product.defaultUnitAmount) : Number(item.item.unitAmount));
+        const discountPercent = input.discountPercent ?? Number(item.item.discountPercent);
+        const taxPercent = input.taxPercent ?? Number(item.item.taxPercent);
+        const line = calculateCommercialLine({ quantity: input.quantity, unitAmount, discountPercent, taxPercent });
+        const updatePayload: Record<string, any> = {
+          description,
+          quantity: input.quantity.toFixed(2),
+          unitAmount: unitAmount.toFixed(2),
+          discountPercent: discountPercent.toFixed(2),
+          taxPercent: taxPercent.toFixed(2),
+          lineSubtotal: line.subtotal.toFixed(2),
+          discountAmount: line.discountAmount.toFixed(2),
+          taxAmount: line.taxAmount.toFixed(2),
+          lineTotal: line.total.toFixed(2),
+        };
+        if (input.productId !== undefined) {
+          updatePayload.productId = product?.id ?? null;
+          updatePayload.productName = product?.name ?? null;
+          updatePayload.productSku = product?.sku ?? null;
+          updatePayload.billingType = product?.billingType ?? "one_time";
+        }
+        await db.update(quoteItems).set(updatePayload).where(eq(quoteItems.id, item.item.id));
         const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, item.quote.id));
         const summary = calculateCommercialSummary(items);
         await db.update(quotes).set({ subtotalAmount: summary.subtotal.toFixed(2), discountAmount: summary.discountAmount.toFixed(2), taxAmount: summary.taxAmount.toFixed(2), totalAmount: summary.total.toFixed(2) }).where(eq(quotes.id, item.quote.id));

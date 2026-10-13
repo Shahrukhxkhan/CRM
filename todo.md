@@ -103,19 +103,19 @@
 - [x] Ensure grouping controls remain available for Tasks and Deals after Contacts grouping is removed.
 - [x] Add focused regression coverage for Contacts column-only controls and Tasks/Deals grouping-capable controls.
 - [x] Define and obtain approval for owner-scoped products, price-book entries, and deal/quote line-item catalog references.
-- [ ] Build owner-managed product and price-book controls within the existing Deals workspace.
-- [ ] Add catalog-backed deal and quote line items with snapshot pricing, discounts, taxes, and recalculated totals.
-- [ ] Extend quote item create, update, and total refresh procedures for catalog references, discount, tax, and snapshot totals.
-- [ ] Add product selection and discount/tax controls to the existing quote workflow without removing free-form line items.
+- [x] Build owner-managed product and price-book controls within the existing Deals workspace.
+- [x] Add catalog-backed deal and quote line items with snapshot pricing, discounts, taxes, and recalculated totals.
+- [x] Extend quote item create, update, and total refresh procedures for catalog references, discount, tax, and snapshot totals.
+- [x] Add product selection and discount/tax controls to the existing quote workflow without removing free-form line items.
 - [x] Add catalog-backed deal line items with owner-scoped pricing snapshots, discount/tax calculations, and deal-total recalculation.
 - [x] Add deterministic catalog-backed line and quote-summary pricing calculation coverage; automated validation passes with 33 tests and zero TypeScript errors.
-- [ ] Add product edit, activation/deactivation, and archive controls with owner-scoped validation.
-- [ ] Add price-book entry edit, activation/deactivation, and effective-date management controls.
-- [ ] Add focused product/price-book update/deactivation coverage and visual verification.
-- [ ] Update initial quote creation to persist commercial snapshot fields and quote subtotal, discount, tax, and grand-total values.
-- [ ] Extend the primary quote create/edit controls with product selection and discount/tax inputs while retaining free-form line items.
-- [ ] Add focused initial-quote and quote-item update/remove commercial snapshot coverage.
-- [ ] Add focused catalog/pricing calculation coverage and visually verify the commercial workflow.
+- [x] Add product edit, activation/deactivation, and archive controls with owner-scoped validation.
+- [x] Add price-book entry edit, activation/deactivation, and effective-date management controls.
+- [x] Add focused product/price-book update/deactivation coverage and visual verification.
+- [x] Update initial quote creation to persist commercial snapshot fields and quote subtotal, discount, tax, and grand-total values.
+- [x] Extend the primary quote create/edit controls with product selection and discount/tax inputs while retaining free-form line items.
+- [x] Add focused initial-quote and quote-item update/remove commercial snapshot coverage.
+- [x] Add focused catalog/pricing calculation coverage and visually verify the commercial workflow.
 - [ ] Enforce workspace-member record access centrally for all member-scoped collaboration procedures.
 - [ ] Add deterministic role-boundary coverage for owner, manager, contributor, inactive-member, and unknown-user access.
 - [ ] Add deterministic lifecycle coverage for import profiles, lead-source persistence, Contact 360°, global search, saved views, and commercial snapshots.
