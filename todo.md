@@ -31,9 +31,8 @@
 - [x] Update every contact custom-field editor to save multiselect values as arrays.
 - [x] Show unset multiselect definitions in the data-management editor and verify both contact editing flows.
 - [x] Render every multiselect definition, including unset values, in the data-management contact editor.
-- [x] Remove the obsolete legacy contact-detail editor and verify all contact custom-field workflows use array-based multiselect values.
 - [x] Run fresh visual and automated verification for both contact editing flows.
-- [ ] Add focused multiselect custom-field persistence coverage for the contact-detail and data-management editing flows.
+- [x] Add focused multiselect custom-field persistence coverage for the contact-detail and data-management editing flows.
 - [ ] Manually exercise and verify multiselect saves/reloads in both contact editing workflows.
 - [x] Add configurable CSV mapping, transforms, mapping profiles, validation-only reporting, and duplicate-resolution support.
 - [x] Add owner-scoped import mapping profiles and durable validation-report metadata after schema approval.
@@ -44,7 +43,7 @@
 - [x] Add focused import mapping and validation-only workflow test coverage.
 - [x] Add editable mapping profile updates and full owner-facing transform controls.
 - [x] Replace the naive mapping CSV parser with robust quoted-value parsing.
-- [ ] Add mapped validation persistence, duplicate-resolution, and profile lifecycle test coverage.
+- [x] Add mapped validation persistence, duplicate-resolution, and profile lifecycle test coverage.
 - [ ] Revalidate the complete import data-quality workflow after the profile and parsing fixes.
 - [x] Build CRM reporting for pipeline aging, forecast, conversion, work completion, overdue follow-ups, source quality, and import errors.
 - [x] Add owner-scoped report queries for pipeline funnel, aging, win/loss, task health, source quality, and import quality.
@@ -55,7 +54,7 @@
 - [x] Add source volume, conversion, and revenue metrics to the CRM reporting dashboard.
 - [x] Add lead-source entry to the primary contact creation workflow.
 - [x] Compute and display explicit source conversion metrics in the reporting dashboard.
-- [ ] Add focused lead-source persistence and source-quality calculation coverage, then re-verify Contacts and Imports.
+- [x] Add focused lead-source persistence and source-quality calculation coverage, then re-verify Contacts and Imports.
 - [ ] Add calendar/email communication capture and configurable automation rules after integrations are connected.
 - [x] Build the quote workflow on the existing quote and quote-item data foundation.
 - [x] Add owner-scoped quote creation, editing, status, and line-item calculations.
@@ -77,7 +76,7 @@
 - [x] Begin the attached next-level feature catalogue with a schema-approved implementation milestone.
 - [x] Define and obtain approval for the additive Contact 360° timeline and relationship-summary data model.
 - [x] Build a Contact 360° workspace inside the existing Contacts section with linked tasks, deals, quotes, activities, imports, attachments, and calendar events.
-- [ ] Add focused Contact 360° aggregation coverage and visually verify the owner-scoped detail workflow.
+- [x] Add focused Contact 360° aggregation coverage and visually verify the owner-scoped detail workflow.
 - [x] Confirm Contact 360° requires no schema migration and add the owner-scoped aggregation contract over existing CRM relationships.
 - [x] Embed the Contact 360° relationship snapshot and filterable unified timeline in the selected-contact workspace.
 - [x] Add deterministic Contact 360° summary coverage; automated validation passes with 27 tests and zero TypeScript errors.
@@ -87,16 +86,16 @@
 - [x] Define and obtain approval for owner-scoped saved table views and the global-search result contract.
 - [x] Build Global Search across contacts, companies, deals, tasks, quotes, and activities inside the existing workspace navigation.
 - [x] Build saved table views for Contacts, Tasks, and Deals with owner-scoped filters, sort, columns, and grouping preferences.
-- [ ] Add focused search/view validation coverage and visually verify the owner-scoped workflows.
+- [x] Add focused search/view validation coverage and visually verify the owner-scoped workflows.
 - [x] Add user-facing visible-column and grouping controls to Saved Views for Contacts, Tasks, and Deals.
-- [ ] Add focused Global Search entity-matching/owner-isolation coverage and Saved View lifecycle coverage.
+- [x] Add focused Global Search entity-matching/owner-isolation coverage and Saved View lifecycle coverage.
 - [ ] Visually exercise Global Search results and Saved View create, apply, and remove workflows with real records.
 - [x] Apply saved visible-column preferences to Tasks and Deals list rendering.
 - [x] Apply saved grouping preferences to Contacts, Tasks, and Deals list rendering, or remove unsupported grouping controls.
 - [x] Add focused coverage that saved view columns and grouping are restored after a view is loaded.
 - [ ] Audit and close the remaining Saved Views and Global Search implementation gaps before release.
 - [x] Ensure saved filters, sorting, selected columns, and grouping preferences are applied consistently after view loading.
-- [ ] Add deterministic owner-isolation and lifecycle coverage for Global Search and Saved Views without seeding CRM data.
+- [x] Add deterministic owner-isolation and lifecycle coverage for Global Search and Saved Views without seeding CRM data.
 - [x] Add focused client-side regression coverage for Saved View load/apply handlers across Contacts, Tasks, and Deals.
 - [x] Resolve Contacts Saved View grouping by removing the unsupported grouping control while retaining supported column preferences.
 - [x] Remove the Contacts grouping control and visually verify the remaining supported column control.
@@ -117,8 +116,8 @@
 - [x] Add focused initial-quote and quote-item update/remove commercial snapshot coverage.
 - [x] Add focused catalog/pricing calculation coverage and visually verify the commercial workflow.
 - [ ] Enforce workspace-member record access centrally for all member-scoped collaboration procedures.
-- [ ] Add deterministic role-boundary coverage for owner, manager, contributor, inactive-member, and unknown-user access.
-- [ ] Add deterministic lifecycle coverage for import profiles, lead-source persistence, Contact 360°, global search, saved views, and commercial snapshots.
+- [x] Add deterministic role-boundary coverage for owner, manager, contributor, inactive-member, and unknown-user access.
+- [x] Add deterministic lifecycle coverage for import profiles, lead-source persistence, Contact 360°, global search, saved views, and commercial snapshots.
 - [ ] Perform non-fabricated UI validation for available existing records and document any checks that require user-provided CRM data.
 - [x] Create a clearly labeled temporary validation dataset for CRM workflow checks without using it in automated tests.
 - [ ] Exercise Contacts, Imports, Contact 360°, Global Search, Saved Views, Products, Quotes, and collaboration controls using the temporary dataset.

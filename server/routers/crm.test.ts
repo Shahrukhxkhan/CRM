@@ -85,6 +85,18 @@ describe("multiselect contact custom fields", () => {
     expect(serialized).toBe('["Founder","Priority account"]');
     expect(JSON.parse(serialized)).toEqual(selected);
   });
+
+  it("handles empty array, single string, and preserves array formatting for contact detail and data management", () => {
+    expect(serializeCustomFieldValue([])).toBe("[]");
+    expect(JSON.parse(serializeCustomFieldValue([]))).toEqual([]);
+
+    const tags = ["Tier 1", "VIP", "Enterprise"];
+    const serialized = serializeCustomFieldValue(tags);
+    const parsed = JSON.parse(serialized);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(3);
+    expect(parsed).toContain("VIP");
+  });
 });
 
 describe("CSV mapping profiles", () => {
@@ -106,6 +118,36 @@ describe("CSV mapping profiles", () => {
     expect(existing).toMatchObject({ action: "update", contactId: 42, leadSource: "Referral" });
   });
 
+  it("handles 'skip' duplicate strategy by skipping existing contacts and creating new ones", () => {
+    const classified = classifyImportRows([
+      { rowNumber: 2, firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", phone: "", jobTitle: "", leadSource: "Referral", relationshipStage: "Lead" },
+      { rowNumber: 3, firstName: "Charles", lastName: "Babbage", email: "charles@example.com", phone: "", jobTitle: "", leadSource: "Outbound", relationshipStage: "Lead" },
+    ], "skip", new Map([["ada@example.com", { id: 42, normalizedEmail: "ada@example.com" }]]));
+
+    expect(classified[0]).toMatchObject({ action: "skip", contactId: 42, normalizedEmail: "ada@example.com" });
+    expect(classified[1]).toMatchObject({ action: "create", contactId: undefined, normalizedEmail: "charles@example.com" });
+  });
+
+  it("handles 'create' duplicate strategy by creating new entries even if email exists in database", () => {
+    const classified = classifyImportRows([
+      { rowNumber: 2, firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", phone: "", jobTitle: "", leadSource: "Referral", relationshipStage: "Lead" },
+    ], "create", new Map([["ada@example.com", { id: 42, normalizedEmail: "ada@example.com" }]]));
+
+    expect(classified[0]).toMatchObject({ action: "create", contactId: undefined, normalizedEmail: "ada@example.com" });
+  });
+
+  it("flags validation errors for missing names or malformed emails without crashing", () => {
+    const classified = classifyImportRows([
+      { rowNumber: 2, firstName: "", lastName: "Lovelace", email: "ada@example.com", phone: "", jobTitle: "", leadSource: "", relationshipStage: "Lead" },
+      { rowNumber: 3, firstName: "Ada", lastName: "", email: "ada2@example.com", phone: "", jobTitle: "", leadSource: "", relationshipStage: "Lead" },
+      { rowNumber: 4, firstName: "Ada", lastName: "Lovelace", email: "not-an-email", phone: "", jobTitle: "", leadSource: "", relationshipStage: "Lead" },
+    ], "update", new Map());
+
+    expect(classified[0]).toMatchObject({ action: "error", errorMessage: "First and last name are required." });
+    expect(classified[1]).toMatchObject({ action: "error", errorMessage: "First and last name are required." });
+    expect(classified[2]).toMatchObject({ action: "error", errorMessage: "Email address is invalid." });
+  });
+
   it("flags duplicate normalized emails within a mapped CSV before any contact write", () => {
     const rows = classifyImportRows([
       { rowNumber: 2, firstName: "Ada", lastName: "Lovelace", email: "ADA@example.com", phone: "", jobTitle: "", leadSource: "Referral", relationshipStage: "Lead" },
@@ -117,6 +159,13 @@ describe("CSV mapping profiles", () => {
 });
 
 describe("CRM reporting", () => {
+  it("validates report date ranges correctly", () => {
+    expect(isValidReportRange(new Date("2026-01-01"), new Date("2026-02-01"))).toBe(true);
+    expect(isValidReportRange(new Date("2026-02-01"), new Date("2026-01-01"))).toBe(false);
+    expect(isValidReportRange(undefined, new Date("2026-01-01"))).toBe(true);
+    expect(isValidReportRange(new Date("2026-01-01"), undefined)).toBe(true);
+  });
+
   it("buckets open pipeline records by their most recent update date", () => {
     const now = new Date("2026-08-19T12:00:00.000Z").getTime();
     const buckets = buildAgingBuckets([
@@ -132,11 +181,13 @@ describe("CRM reporting", () => {
     const rows = buildSourceQualityRows(new Map([
       ["Referral", { contacts: 8, deals: 4, wonDeals: 3, amount: 4000, wonAmount: 3000 }],
       ["Event", { contacts: 3, deals: 1, wonDeals: 0, amount: 6500, wonAmount: 0 }],
+      ["Cold Outreach", { contacts: 0, deals: 0, wonDeals: 0, amount: 0, wonAmount: 0 }],
     ]));
 
     expect(rows).toEqual([
       expect.objectContaining({ source: "Event", contactToDealConversion: 33, dealWinConversion: 0 }),
       expect.objectContaining({ source: "Referral", contactToDealConversion: 50, dealWinConversion: 75 }),
+      expect.objectContaining({ source: "Cold Outreach", contactToDealConversion: 0, dealWinConversion: 0 }),
     ]);
   });
 
@@ -251,6 +302,67 @@ describe("Saved Views", () => {
       { id: "task-3", occurredAt: new Date("2026-08-22T00:00:00.000Z") },
     ], 2);
     expect(records.map(record => record.id)).toEqual(["deal-2", "task-3"]);
+  });
+
+  it("handles empty global search results and limits greater than available results", () => {
+    expect(sortGlobalSearchResults([], 10)).toEqual([]);
+    const single = [{ id: "quote-1", occurredAt: new Date("2026-08-21T00:00:00.000Z") }];
+    expect(sortGlobalSearchResults(single, 5)).toEqual(single);
+  });
+
+  it("validates saved view entity types strictly", () => {
+    expect(() => parseSavedViewConfig(JSON.stringify({ filters: {}, sort: { field: "invalid", direction: "desc" }, columns: [] }))).not.toThrow();
+    // Invalid sort direction
+    expect(() => parseSavedViewConfig(JSON.stringify({ filters: {}, sort: { field: "name", direction: "invalid" }, columns: [] }))).toThrow();
+    // Columns exceeds maximum allowed 12
+    const tooManyColumns = Array.from({ length: 15 }, (_, i) => `col_${i}`);
+    expect(() => parseSavedViewConfig(JSON.stringify({ filters: {}, sort: { field: "name", direction: "asc" }, columns: tooManyColumns }))).toThrow();
+  });
+});
+
+describe("deterministic collaboration role boundaries", () => {
+  const ownerId = 1;
+  const managerId = 2;
+  const contributorId = 3;
+  const inactiveManagerId = 4;
+  const unknownUserId = 99;
+
+  const activeManager = { isActive: true, workspaceRole: "manager" as const };
+  const activeContributor = { isActive: true, workspaceRole: "contributor" as const };
+  const inactiveManager = { isActive: false, workspaceRole: "manager" as const };
+
+  it("proves complete coordination permission matrix across all role states", () => {
+    // Owner can always coordinate
+    expect(canCoordinateWorkspace(ownerId, ownerId)).toBe(true);
+    // Active manager can coordinate
+    expect(canCoordinateWorkspace(ownerId, managerId, activeManager)).toBe(true);
+    // Contributor cannot coordinate
+    expect(canCoordinateWorkspace(ownerId, contributorId, activeContributor)).toBe(false);
+    // Inactive manager cannot coordinate
+    expect(canCoordinateWorkspace(ownerId, inactiveManagerId, inactiveManager)).toBe(false);
+    // Unknown user cannot coordinate
+    expect(canCoordinateWorkspace(ownerId, unknownUserId, null)).toBe(false);
+    expect(canCoordinateWorkspace(ownerId, unknownUserId, undefined)).toBe(false);
+  });
+
+  it("proves complete record access authorization matrix across all role states", () => {
+    const recordAssignedToContributor = contributorId;
+    const recordAssignedToOther = 88;
+
+    // Workspace owner can always read any record
+    expect(canReadWorkspaceRecord(ownerId, ownerId, null)).toBe(true);
+    expect(canReadWorkspaceRecord(ownerId, ownerId, recordAssignedToContributor)).toBe(true);
+
+    // Contributor can read only directly assigned records
+    expect(canReadWorkspaceRecord(ownerId, contributorId, recordAssignedToContributor, activeContributor)).toBe(true);
+    expect(canReadWorkspaceRecord(ownerId, contributorId, recordAssignedToOther, activeContributor)).toBe(false);
+    expect(canReadWorkspaceRecord(ownerId, contributorId, null, activeContributor)).toBe(false);
+
+    // Inactive member cannot read even assigned records
+    expect(canReadWorkspaceRecord(ownerId, contributorId, recordAssignedToContributor, { ...activeContributor, isActive: false })).toBe(false);
+
+    // Unknown user has zero record visibility
+    expect(canReadWorkspaceRecord(ownerId, unknownUserId, unknownUserId, null)).toBe(false);
   });
 });
 
