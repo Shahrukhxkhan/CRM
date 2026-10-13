@@ -11,6 +11,7 @@ import { ContactsWorkspace } from "./pages/DataManagementPanels";
 import { ImportsWorkspace } from "./pages/ImportDataQualityPanel";
 import ImportReview from "./pages/ImportReview";
 import Home from "./pages/Home";
+import LoginPage from "./pages/Login";
 
 function DashboardRouter() {
   return <DashboardLayout><Switch>
@@ -29,6 +30,7 @@ function DashboardRouter() {
 function Router() {
   return <Switch>
     <Route path={"/"} component={Home} />
+    <Route path={"/login"} component={LoginPage} />
     <Route><DashboardRouter /></Route>
   </Switch>;
 }
